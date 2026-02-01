@@ -48,6 +48,9 @@ class Config:
     # Feedback settings
     sound_effects: bool = True
 
+    # Text improvement (uses Claude CLI)
+    improve_text: bool = False
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the configuration directory path."""
@@ -103,6 +106,7 @@ class Config:
                 audio_device=stt_config.get("audio_device", cls.audio_device),
                 output_mode=stt_config.get("output_mode", cls.output_mode),
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
+                improve_text=stt_config.get("improve_text", cls.improve_text),
             )
             config = config.validate()
             if legacy_path and tomli_w is not None:
@@ -140,6 +144,7 @@ class Config:
                 "audio_device": self.audio_device,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
+                "improve_text": self.improve_text,
             }
         }
 

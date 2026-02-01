@@ -19,6 +19,7 @@ from .hotkey import HotkeyListener
 from .keyboard import output_text
 from .recorder import AudioRecorder, RecorderConfig
 from .sounds import play_sound
+from .text_improver import improve_text
 from .window import get_active_window, WindowInfo
 
 
@@ -141,6 +142,11 @@ class STTDaemon:
                 if self.config.sound_effects:
                     play_sound("warning")
                 continue
+
+            # Improve text with Claude if enabled
+            if self.config.improve_text:
+                self._logger.debug("Improving text with Claude...")
+                text = improve_text(text)
 
             display_text = text[:100] + "..." if len(text) > 100 else text
             self._logger.info("Transcribed: %s", display_text)
