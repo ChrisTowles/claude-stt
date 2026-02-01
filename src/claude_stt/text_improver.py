@@ -27,7 +27,6 @@ def improve_text(text: str, timeout: float = 30.0) -> str:
                 "claude",
                 "--model", "haiku",
                 "--print",
-                "--no-input",
                 "-p", f"{IMPROVE_PROMPT}\n\nText: {text}",
             ],
             capture_output=True,
