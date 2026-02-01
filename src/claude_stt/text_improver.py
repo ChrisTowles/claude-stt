@@ -37,7 +37,7 @@ def improve_text(text: str, timeout: float = 30.0) -> str:
         if result.returncode == 0 and result.stdout.strip():
             improved = result.stdout.strip()
             if improved:
-                _logger.debug("Text improved: %r -> %r", text, improved)
+                _logger.info("Text improved: %r -> %r", text, improved)
                 return improved
         _logger.warning("claude CLI failed: %s", result.stderr)
     except subprocess.TimeoutExpired:
