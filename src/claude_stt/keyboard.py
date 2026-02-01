@@ -66,17 +66,60 @@ def _output_via_wtype(text: str, config: Config) -> bool:
         True if successful, False otherwise.
     """
     try:
-        result = subprocess.run(
-            ["wtype", "--", text],
-            capture_output=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            if config.sound_effects:
-                play_sound("complete")
-            return True
-        _logger.warning("wtype failed: %s", result.stderr.decode(errors="replace"))
-        return False
+        if config.soft_newlines and "\n" in text:
+            # Handle soft newlines: Shift+Enter for intermediate, Enter for final
+            has_trailing = text.endswith("\n")
+            lines = text.split("\n")
+            # Remove empty trailing element if text ended with newline
+            if has_trailing and lines and lines[-1] == "":
+                lines = lines[:-1]
+
+            for i, line in enumerate(lines):
+                if line:
+                    result = subprocess.run(
+                        ["wtype", "--", line],
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    if result.returncode != 0:
+                        _logger.warning("wtype failed: %s", result.stderr.decode(errors="replace"))
+                        return False
+
+                # Add newline after this line (except after the last line if no trailing newline)
+                is_last = i == len(lines) - 1
+                if not is_last:
+                    # Soft newline (Shift+Enter)
+                    result = subprocess.run(
+                        ["wtype", "-k", "shift+Return"],
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    if result.returncode != 0:
+                        _logger.warning("wtype shift+Return failed")
+                        return False
+                elif has_trailing:
+                    # Final trailing newline - use real Enter
+                    result = subprocess.run(
+                        ["wtype", "-k", "Return"],
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    if result.returncode != 0:
+                        _logger.warning("wtype Return failed")
+                        return False
+        else:
+            result = subprocess.run(
+                ["wtype", "--", text],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                _logger.warning("wtype failed: %s", result.stderr.decode(errors="replace"))
+                return False
+
+        if config.sound_effects:
+            play_sound("complete")
+        return True
     except subprocess.TimeoutExpired:
         _logger.warning("wtype timed out")
         return False
@@ -162,6 +205,36 @@ def output_text(
     return _output_via_injection(text, window_info, config)
 
 
+def _type_with_soft_newlines(kb: Controller, text: str) -> None:
+    """Type text using Shift+Enter for intermediate newlines.
+
+    Args:
+        kb: Keyboard controller.
+        text: Text to type, may contain newlines.
+    """
+    has_trailing = text.endswith("\n")
+    lines = text.split("\n")
+    # Remove empty trailing element if text ended with newline
+    if has_trailing and lines and lines[-1] == "":
+        lines = lines[:-1]
+
+    for i, line in enumerate(lines):
+        if line:
+            kb.type(line)
+
+        is_last = i == len(lines) - 1
+        if not is_last:
+            # Soft newline: Shift+Enter
+            kb.press(Key.shift)
+            kb.press(Key.enter)
+            kb.release(Key.enter)
+            kb.release(Key.shift)
+        elif has_trailing:
+            # Final trailing newline: real Enter
+            kb.press(Key.enter)
+            kb.release(Key.enter)
+
+
 def _output_via_injection(
     text: str,
     window_info: Optional[WindowInfo],
@@ -197,7 +270,10 @@ def _output_via_injection(
 
         # Type the text
         kb = get_keyboard()
-        kb.type(text)
+        if config.soft_newlines and "\n" in text:
+            _type_with_soft_newlines(kb, text)
+        else:
+            kb.type(text)
 
         if config.sound_effects:
             play_sound("complete")
