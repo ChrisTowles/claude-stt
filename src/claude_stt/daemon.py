@@ -292,6 +292,10 @@ def start_daemon(background: bool = False):
 
 def toggle_recording():
     """Toggle recording on/off by sending SIGUSR1 to the daemon."""
+    if not hasattr(signal, "SIGUSR1"):
+        logger.error("Toggle recording is not supported on this platform.")
+        return False
+
     data = _read_pid_file()
     if not data:
         logger.error("Daemon is not running.")

@@ -155,10 +155,6 @@ def output_text(
     if mode != "injection":
         return _output_via_clipboard(text, config)
 
-    if not _PYNPUT_AVAILABLE:
-        _warn_pynput_missing()
-        return _output_via_clipboard(text, config)
-
     return _output_via_injection(text, window_info, config)
 
 

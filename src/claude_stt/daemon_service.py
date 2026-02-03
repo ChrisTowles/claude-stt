@@ -256,7 +256,10 @@ class STTDaemon:
         try:
             signal.signal(signal.SIGINT, shutdown)
             signal.signal(signal.SIGTERM, shutdown)
-            signal.signal(signal.SIGUSR1, toggle_recording)
+            if hasattr(signal, "SIGUSR1"):
+                signal.signal(signal.SIGUSR1, toggle_recording)
+            else:
+                self._logger.debug("SIGUSR1 not supported on this platform")
         except Exception:
             self._logger.debug("Signal handlers unavailable", exc_info=True)
 
