@@ -143,6 +143,14 @@ class STTDaemon:
                     play_sound("warning")
                 continue
 
+            # Filter out STT hallucinations (short phantom phrases on silence/quick stops)
+            cleaned = text.lower().replace("thank you", "").strip()
+            if len(cleaned) <= 5:
+                self._logger.info("Filtered likely hallucination: %r", text)
+                if self.config.sound_effects:
+                    play_sound("warning")
+                continue
+
             # Improve text with Claude if enabled
             if self.config.improve_text:
                 self._logger.debug("Improving text with Claude...")
