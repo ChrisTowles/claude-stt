@@ -80,7 +80,7 @@ class STTDaemon:
                     device_info = sd.query_devices(kind='input')
                     self._logger.info("Audio input: %s (default)", device_info['name'])
             except Exception:
-                pass
+                self._logger.debug("Could not query audio device info", exc_info=True)
 
             self._engine = build_engine(self.config)
             if not self._engine.is_available():
@@ -139,16 +139,14 @@ class STTDaemon:
             text = text.strip()
             if not text:
                 self._logger.info("No speech detected")
-                if self.config.sound_effects:
-                    play_sound("warning")
+                self._play_warning()
                 continue
 
             # Filter out STT hallucinations (short phantom phrases on silence/quick stops)
             cleaned = text.lower().replace("thank you", "").strip()
             if len(cleaned) <= 5:
                 self._logger.info("Filtered likely hallucination: %r", text)
-                if self.config.sound_effects:
-                    play_sound("warning")
+                self._play_warning()
                 continue
 
             # Improve text with Claude if enabled
@@ -160,6 +158,11 @@ class STTDaemon:
             self._logger.info("Transcribed: %s", display_text)
             if not output_text(text, window_info, self.config):
                 self._logger.warning("Failed to output transcription")
+
+    def _play_warning(self) -> None:
+        """Play a warning sound if sound effects are enabled."""
+        if self.config.sound_effects:
+            play_sound("warning")
 
     def _on_recording_start(self):
         """Called when recording should start."""

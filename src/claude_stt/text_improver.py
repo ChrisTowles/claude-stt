@@ -27,22 +27,22 @@ def _colored_diff(original: str, improved: str) -> str:
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
         if op == "equal":
             result.extend(orig_words[i1:i2])
-        elif op == "replace":
-            # Show removed in red strikethrough, added in green
-            for word in orig_words[i1:i2]:
-                result.append(f"{_RED}{_STRIKETHROUGH}{word}{_RESET}")
-            for word in impr_words[j1:j2]:
-                result.append(f"{_GREEN}{word}{_RESET}")
-        elif op == "delete":
-            for word in orig_words[i1:i2]:
-                result.append(f"{_RED}{_STRIKETHROUGH}{word}{_RESET}")
-        elif op == "insert":
-            for word in impr_words[j1:j2]:
-                result.append(f"{_GREEN}{word}{_RESET}")
+        else:
+            # "replace" emits both removed and inserted; "delete"/"insert" emit one side
+            if op in ("replace", "delete"):
+                result.extend(
+                    f"{_RED}{_STRIKETHROUGH}{w}{_RESET}" for w in orig_words[i1:i2]
+                )
+            if op in ("replace", "insert"):
+                result.extend(f"{_GREEN}{w}{_RESET}" for w in impr_words[j1:j2])
 
     return " ".join(result)
 
-IMPROVE_PROMPT = "Fix punctuation, capitalization, and grammar. Keep concise. Output only the corrected text, nothing else."
+
+_IMPROVE_PROMPT = (
+    "Fix punctuation, capitalization, and grammar. "
+    "Keep concise. Output only the corrected text, nothing else."
+)
 
 
 def improve_text(text: str, timeout: float = 30.0) -> str:
@@ -64,21 +64,20 @@ def improve_text(text: str, timeout: float = 30.0) -> str:
                 "claude",
                 "--model", "haiku",
                 "--print",
-                "-p", f"{IMPROVE_PROMPT}\n\nText: {text}",
+                "-p", f"{_IMPROVE_PROMPT}\n\nText: {text}",
             ],
             capture_output=True,
             timeout=timeout,
             text=True,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            improved = result.stdout.strip()
-            if improved and improved != text:
-                diff = _colored_diff(text, improved)
-                _logger.info("Text improved: %s", diff)
-                return improved
-            if improved:
-                return improved
-        _logger.warning("claude CLI failed: %s", result.stderr)
+        if result.returncode != 0 or not result.stdout.strip():
+            _logger.warning("claude CLI failed: %s", result.stderr)
+            return text
+
+        improved = result.stdout.strip()
+        if improved != text:
+            _logger.info("Text improved: %s", _colored_diff(text, improved))
+        return improved
     except subprocess.TimeoutExpired:
         _logger.warning("claude CLI timed out")
     except FileNotFoundError:
