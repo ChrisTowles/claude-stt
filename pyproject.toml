@@ -11,7 +11,7 @@ authors = [
 keywords = ["claude", "speech-to-text", "stt", "voice", "dictation"]
 
 dependencies = [
-    "useful-moonshine-onnx",
+    "faster-whisper>=1.0",
     "sounddevice>=0.4",
     "pynput>=1.7",
     "pyperclip>=1.8",
@@ -21,10 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-whisper = ["faster-whisper>=1.0"]
 macos = ["pyobjc-framework-Cocoa"]
 windows = ["pywin32"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "soundfile"]
 
 [project.scripts]
 claude-stt = "claude_stt.cli:main"

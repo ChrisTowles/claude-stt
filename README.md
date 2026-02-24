@@ -1,191 +1,100 @@
-# Claude STT
+# Claude STT (Fork)
 
-Speech-to-text input for Claude Code. Hold a hotkey, speak, and your words appear in the input field — all processed locally.
+Speech-to-text input for Claude Code. Hold a hotkey, speak, and your words appear in the focused app — all processed locally.
 
-[![License](https://img.shields.io/github/license/jarrodwatts/claude-stt)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/jarrodwatts/claude-stt)](https://github.com/jarrodwatts/claude-stt/stargazers)
+> **Note**: This is a diverged fork of [jarrodwatts/claude-stt](https://github.com/jarrodwatts/claude-stt). While a PR was contributed back upstream, this fork has diverged significantly: switched to uv, removed Moonshine in favor of Whisper-only, removed the Claude Code plugin integration, added ydotool support for Wayland/COSMIC, audio cues for daemon lifecycle, configurable language, optional text improvement via Claude CLI (grammar/punctuation cleanup before typing), and other changes that differ from upstream goals.
 
-![Claude STT in action](preview.png)
+## Quick Start
 
-## Install
+```bash
+# Clone and install
+git clone https://github.com/ChrisTowles/claude-stt
+cd claude-stt
+uv sync --extra dev
 
-Inside a Claude Code instance, run the following commands:
-
-**Step 1: Add the marketplace**
-```
-/plugin marketplace add jarrodwatts/claude-stt
-```
-
-**Step 2: Install the plugin**
-```
-/plugin install claude-stt
+# Run the daemon
+uv run claude-stt run
 ```
 
-**Step 3: Run setup**
-```
-/claude-stt:setup
-```
+Press **Ctrl+Shift+Space** to start recording, press again to stop and transcribe.
 
-Done! Press **Ctrl+Shift+Space** to start recording, press again to stop and transcribe.
-
-> **Note**: Setup installs dependencies (uv if available, otherwise a local `.venv`),
-> downloads the Moonshine model (~200MB), and checks microphone permissions.
-
----
-
-## What is Claude STT?
-
-Claude STT gives you voice input directly into Claude Code. No typing required — just speak naturally.
-
-| What You Get | Why It Matters |
-|--------------|----------------|
-| **Local processing** | All audio processed on-device using Moonshine STT |
-| **Low latency** | ~400ms transcription time |
-| **Push-to-talk** | Hold hotkey to record, release to transcribe |
-| **Cross-platform** | macOS, Linux, Windows |
-| **Privacy first** | No audio or text sent to external services |
-
-### How It Works
+## How It Works
 
 ```
-Press Ctrl+Shift+Space → start recording
-        ↓
+Press Ctrl+Shift+Space -> start recording
+        |
 Audio captured from microphone
-        ↓
-Press Ctrl+Shift+Space → stop recording
-        ↓
-Moonshine STT processes locally (~400ms)
-        ↓
-Text inserted into Claude Code input
+        |
+Press Ctrl+Shift+Space -> stop recording
+        |
+Whisper STT processes locally
+        |
+Text injected into focused app (ydotool/pynput)
 ```
 
-**Key details:**
 - Audio is processed in memory and immediately discarded
-- Uses Moonshine ONNX for fast local inference
-- Keyboard injection or clipboard fallback
-- Native system sounds for audio feedback
-
----
+- Uses faster-whisper for local inference
+- Text injection via ydotool (Wayland) or pynput (X11), with clipboard fallback
+- Audio feedback for recording start/stop, transcription complete, daemon ready/shutdown
 
 ## Configuration
 
-Customize your settings anytime:
-
-```
-/claude-stt:config
-```
-
-### Options
+Settings stored in `~/.config/claude-stt/config.toml`.
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `hotkey` | Key combo | `ctrl+shift+space` | Trigger recording |
 | `mode` | `toggle`, `push-to-talk` | `toggle` | Press to toggle vs hold to record |
-| `engine` | `moonshine`, `whisper` | `moonshine` | STT engine |
-| `moonshine_model` | `moonshine/tiny`, `moonshine/base` | `moonshine/base` | Model size |
+| `whisper_model` | Whisper model name | `medium` | Model size (tiny, base, small, medium, large) |
+| `language` | ISO 639-1 code or `auto` | `auto` | Transcription language (`en`, `fr`, etc.) |
 | `output_mode` | `auto`, `injection`, `clipboard` | `auto` | How text is inserted |
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
+| `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
+| `improve_text` | `true`, `false` | `false` | Fix grammar/punctuation via Claude CLI |
 | `max_recording_seconds` | 1-600 | 300 | Maximum recording duration |
-
-Settings stored in `~/.claude/plugins/claude-stt/config.toml`.
-
----
+| `audio_device` | Device index or null | null | Audio input device (null = system default) |
 
 ## Requirements
 
 - **Python 3.10-3.13**
-- **~200MB disk space** for STT model
+- **uv** (package manager)
 - **Microphone access**
 
 ### Platform-Specific
 
-| Platform | Additional Requirements |
-|----------|------------------------|
-| **macOS** | Accessibility permissions (System Settings > Privacy & Security) |
-| **Linux** | xdotool for window management; X11 recommended (Wayland has limitations) |
+| Platform | Requirements |
+|----------|-------------|
+| **Linux (Wayland)** | `ydotool` for text injection (required) |
+| **Linux (X11)** | `xdotool` for window management |
+| **macOS** | Accessibility permissions |
 | **Windows** | pywin32 for window tracking |
 
----
+## CLI Commands
 
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `/claude-stt:setup` | First-time setup: check environment, install deps, download model |
-| `/claude-stt:start` | Start the STT daemon |
-| `/claude-stt:stop` | Stop the STT daemon |
-| `/claude-stt:status` | Show daemon status and readiness checks |
-| `/claude-stt:config` | Change settings |
-
-You can also use the CLI directly:
-
+```bash
+claude-stt run              # Run daemon in foreground
+claude-stt start --background  # Run daemon in background
+claude-stt stop             # Stop daemon
+claude-stt status           # Show daemon status
+claude-stt setup            # First-time setup
 ```
-claude-stt setup
-claude-stt start --background
-```
-
----
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| No audio input | Check microphone permissions in system settings |
-| Keyboard injection not working | **macOS**: Grant Accessibility permissions. **Linux**: Ensure xdotool installed |
-| Model not loading | Run `/claude-stt:setup` to download. Check disk space (~200MB) |
-| Hotkey test fails during setup | Fix permissions or rerun `/claude-stt:setup --skip-hotkey-test` to continue setup |
-| Whisper dependencies missing | Run `/claude-stt:setup --with-whisper`, or `uv sync --directory $CLAUDE_PLUGIN_ROOT --extra whisper`, or `python $CLAUDE_PLUGIN_ROOT/scripts/exec.py -m pip install .[whisper]` |
-| Hotkey not triggering | Check for conflicts with other apps. Try `/claude-stt:config` to change hotkey |
-| Text going to wrong window | Plugin tracks original window — ensure Claude Code was focused when recording started |
+| No audio input | Check microphone permissions |
+| Text not appearing (Wayland) | Install ydotool: `sudo apt install ydotool` |
+| Text not appearing (X11) | Grant Accessibility permissions (macOS) or install xdotool (Linux) |
+| Garbled text on COSMIC | Ensure ydotool is installed (wtype has keymap bugs on COSMIC) |
+| Model not loading | Run `claude-stt setup` to download. Check disk space |
 
-### Logging
-
-Set `CLAUDE_STT_LOG_LEVEL=DEBUG` to get verbose logs when starting the daemon.
-
----
+Set `CLAUDE_STT_LOG_LEVEL=DEBUG` for verbose logs.
 
 ## Privacy
 
-**All processing is local:**
-- Audio captured from your microphone is processed entirely on-device
-- Moonshine runs locally — no cloud API calls
-- Audio is never sent anywhere, never stored (processed in memory, discarded)
-- Transcribed text only goes to Claude Code input or clipboard
-
-**No telemetry or analytics.**
-
----
-
-## Development
-
-```bash
-git clone https://github.com/jarrodwatts/claude-stt
-cd claude-stt
-
-# Install dependencies (uv preferred, falls back to local venv)
-python scripts/setup.py --dev --skip-audio-test --skip-model-download --no-start
-
-# Test locally without installing
-claude --plugin-dir /path/to/claude-stt
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Release Checklist
-
-- Bump versions in `pyproject.toml`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-- Update `CHANGELOG.md`
-- Run tests: `uv run python -m unittest discover -s tests`
-- Verify onboarding in Claude Code (`/plugin install`, `/claude-stt:setup`)
-
----
+All processing is local. No audio or text is sent to external services. No telemetry.
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=jarrodwatts/claude-stt&type=Date)](https://star-history.com/#jarrodwatts/claude-stt&Date)

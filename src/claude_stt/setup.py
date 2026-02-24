@@ -14,7 +14,7 @@ from typing import Sequence
 
 from .config import Config, get_platform, is_wayland
 from .daemon import is_daemon_running
-from .engine_factory import build_engine
+from .engines.whisper import WhisperEngine
 from .errors import EngineError, HotkeyError
 from .hotkey import HotkeyListener
 from .recorder import AudioRecorder, get_sounddevice_import_error
@@ -222,7 +222,7 @@ def _audio_backend_hint() -> str | None:
 
 def _ensure_engine_ready(config: Config, skip_model_download: bool) -> bool:
     try:
-        engine = build_engine(config)
+        engine = WhisperEngine(model_name=config.whisper_model)
     except EngineError as exc:
         _print_error(str(exc))
         return False

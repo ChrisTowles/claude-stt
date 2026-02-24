@@ -34,8 +34,8 @@ uv run ruff check src/
 - `daemon_service.py` - Runtime orchestration (`STTDaemon` class coordinates all components)
 - `hotkey.py` - Global hotkey listener using pynput (supports toggle and push-to-talk modes)
 - `recorder.py` - Audio capture via sounddevice
-- `engines/` - STT engine implementations (Moonshine default, Whisper optional)
-- `keyboard.py` - Text output via keyboard injection or clipboard fallback
+- `engines/whisper.py` - Whisper STT engine (faster-whisper)
+- `keyboard.py` - Text output via ydotool (Wayland), pynput (X11), or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
 - `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`
 
@@ -48,12 +48,9 @@ Hotkey press → AudioRecorder.start() → [user speaks] → Hotkey release
 
 Transcription runs in a dedicated worker thread to avoid blocking the hotkey listener.
 
-### Plugin Structure
+### Scripts
 
-- `commands/` - Slash commands (setup, start, stop, status, config) as markdown files
-- `hooks/hooks.json` - Claude Code plugin hooks
 - `scripts/setup.py` - Bootstrap script that handles venv creation, dependency install, model download
-- `.claude-plugin/plugin.json` - Plugin metadata
 
 ## Task Tracking
 

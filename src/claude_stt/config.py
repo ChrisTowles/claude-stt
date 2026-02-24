@@ -33,8 +33,6 @@ class Config:
     mode: Literal["push-to-talk", "toggle"] = "toggle"
 
     # Engine settings
-    engine: Literal["moonshine", "whisper"] = "moonshine"
-    moonshine_model: str = "moonshine/base"
     whisper_model: str = "medium"
 
     # Audio settings
@@ -103,8 +101,6 @@ class Config:
             config = cls(
                 hotkey=stt_config.get("hotkey", cls.hotkey),
                 mode=stt_config.get("mode", cls.mode),
-                engine=stt_config.get("engine", cls.engine),
-                moonshine_model=stt_config.get("moonshine_model", cls.moonshine_model),
                 whisper_model=stt_config.get("whisper_model", cls.whisper_model),
                 sample_rate=stt_config.get("sample_rate", cls.sample_rate),
                 max_recording_seconds=stt_config.get(
@@ -145,8 +141,6 @@ class Config:
             "claude-stt": {
                 "hotkey": self.hotkey,
                 "mode": self.mode,
-                "engine": self.engine,
-                "moonshine_model": self.moonshine_model,
                 "whisper_model": self.whisper_model,
                 "sample_rate": self.sample_rate,
                 "max_recording_seconds": self.max_recording_seconds,
@@ -189,17 +183,6 @@ class Config:
         if self.mode not in ("push-to-talk", "toggle"):
             logger.warning("Invalid mode '%s'; defaulting to 'toggle'", self.mode)
             self.mode = "toggle"
-
-        if self.engine not in ("moonshine", "whisper"):
-            logger.warning("Invalid engine '%s'; defaulting to 'moonshine'", self.engine)
-            self.engine = "moonshine"
-
-        if self.moonshine_model not in ("moonshine/tiny", "moonshine/base"):
-            logger.warning(
-                "Invalid moonshine_model '%s'; defaulting to 'moonshine/base'",
-                self.moonshine_model,
-            )
-            self.moonshine_model = "moonshine/base"
 
         if not isinstance(self.whisper_model, str) or not self.whisper_model.strip():
             logger.warning("Invalid whisper_model; defaulting to 'medium'")
