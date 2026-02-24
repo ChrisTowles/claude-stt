@@ -10,10 +10,13 @@ class KeyboardOutputTests(unittest.TestCase):
         original_clipboard = keyboard._output_via_clipboard
         original_checked = keyboard._injection_checked_at
         original_capable = keyboard._injection_capable
+        original_has_ydotool = keyboard._has_ydotool
         try:
             keyboard._PYNPUT_AVAILABLE = False
             keyboard._injection_checked_at = None
             keyboard._injection_capable = None
+            # Ensure ydotool doesn't short-circuit the pynput fallback test
+            keyboard._has_ydotool = lambda: False
             captured = {}
 
             def fake_clipboard(text, config):
@@ -30,6 +33,7 @@ class KeyboardOutputTests(unittest.TestCase):
             keyboard._output_via_clipboard = original_clipboard
             keyboard._injection_checked_at = original_checked
             keyboard._injection_capable = original_capable
+            keyboard._has_ydotool = original_has_ydotool
 
 
 if __name__ == "__main__":

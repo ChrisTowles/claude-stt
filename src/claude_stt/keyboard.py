@@ -17,7 +17,7 @@ except Exception as exc:
     _PYNPUT_IMPORT_ERROR = exc
 
 from .config import Config, is_wayland
-from .sounds import play_sound
+from .sounds import SoundEvent, play_sound
 from .window import WindowInfo, restore_focus
 
 # Global keyboard controller
@@ -50,177 +50,83 @@ def _warn_pynput_missing() -> None:
     _pynput_warned = True
 
 
-def _has_wtype() -> bool:
-    """Check if wtype is available for Wayland text input."""
-    return shutil.which("wtype") is not None
+def _has_ydotool() -> bool:
+    """Check if ydotool is available for uinput-based text input."""
+    return shutil.which("ydotool") is not None
 
 
-def _has_wl_copy() -> bool:
-    """Check if wl-copy is available for Wayland clipboard."""
-    return shutil.which("wl-copy") is not None
-
-
-def _output_via_wtype(text: str, config: Config) -> bool:
-    """Output text on Wayland using wl-copy + Ctrl+V paste.
-
-    Direct wtype character injection is broken on some compositors (e.g.
-    COSMIC) so we copy text to the Wayland clipboard with wl-copy and
-    then simulate Ctrl+V to paste it. Falls back to raw wtype typing if
-    wl-copy is not available.
-
-    Args:
-        text: The text to type.
-        config: Configuration.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    _logger.debug("Injecting text via wtype (%d chars)", len(text))
-    # Brief delay to let modifier keys from the hotkey fully release
-    time.sleep(0.2)
-
-    # Preferred path: wl-copy + Ctrl+V paste (works on all compositors)
-    if _has_wl_copy():
-        return _output_via_wl_clipboard_paste(text, config)
-
-    # Fallback: raw wtype character injection
-    _logger.debug("wl-copy not available; falling back to raw wtype")
-    return _output_via_wtype_raw(text, config)
-
-
-def _output_via_wl_clipboard_paste(text: str, config: Config) -> bool:
-    """Copy text to Wayland clipboard and paste with Ctrl+V.
-
-    wl-copy stays alive as the clipboard owner until another copy occurs,
-    so we use Popen without waiting for exit, allowing the process to run
-    in the background.
-
-    Args:
-        text: The text to paste.
-        config: Configuration.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    # Launch wl-copy to set clipboard (runs in background)
-    try:
-        _logger.debug("wl-copy: copying text to clipboard")
-        proc = subprocess.Popen(
-            ["wl-copy", "--", text],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        # Give wl-copy a moment to register with the compositor
-        time.sleep(0.1)
-        # Check it didn't fail immediately
-        rc = proc.poll()
-        if rc is not None and rc != 0:
-            stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-            _logger.warning("wl-copy failed (rc=%d): %s", rc, stderr)
-            return False
-        _logger.debug("wl-copy: process running (pid=%d)", proc.pid)
-    except Exception:
-        _logger.warning("wl-copy launch failed", exc_info=True)
-        return False
-
-    # Small delay to ensure clipboard is ready
-    time.sleep(0.05)
-
-    if not _send_paste_key_command():
-        return False
-
-    if config.sound_effects:
-        play_sound("complete")
-    return True
-
-
-def _send_paste_key_command() -> bool:
-    """Send Ctrl+V using xdotool or wtype.
-
-    Tries xdotool first (works reliably on COSMIC/XWayland), then falls
-    back to wtype if xdotool is unavailable.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    if shutil.which("xdotool"):
-        _logger.debug("xdotool: sending Ctrl+V")
-        result = subprocess.run(
-            ["xdotool", "key", "ctrl+v"],
-            capture_output=True,
-            timeout=3,
-        )
-        if result.returncode == 0:
-            _logger.debug("xdotool: paste succeeded")
-            return True
-        _logger.warning(
-            "xdotool paste failed: %s",
-            result.stderr.decode(errors="replace"),
-        )
-
-    _logger.debug("wtype: sending Ctrl+V")
-    result = subprocess.run(
-        ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
-        capture_output=True,
-        timeout=5,
-    )
-    if result.returncode == 0:
-        _logger.debug("wtype: paste succeeded")
-        return True
-
-    _logger.warning(
-        "wtype paste failed: %s",
-        result.stderr.decode(errors="replace"),
-    )
-    return False
-
-
-def _output_via_wtype_raw(text: str, config: Config) -> bool:
-    """Output text using raw wtype character injection (legacy fallback).
-
-    Args:
-        text: The text to type.
-        config: Configuration.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    use_soft_newlines = config.soft_newlines and "\n" in text
-    ok = _type_with_wtype_soft_newlines(text) if use_soft_newlines else _type_with_wtype(text)
-    if not ok:
-        return False
-
-    if config.sound_effects:
-        play_sound("complete")
-    return True
-
-
-def _type_with_wtype(text: str) -> bool:
-    """Type text using wtype without newline handling.
-
-    Args:
-        text: The text to type.
+def _ydotool_type(text: str) -> bool:
+    """Type text using ydotool.
 
     Returns:
         True if successful, False otherwise.
     """
     result = subprocess.run(
-        ["wtype", "--", text],
+        ["ydotool", "type", "--", text],
         capture_output=True,
+        text=True,
         timeout=10,
     )
     if result.returncode != 0:
-        _logger.warning("wtype failed: %s", result.stderr.decode(errors="replace"))
+        _logger.warning("ydotool type failed: %s", result.stderr)
         return False
     return True
 
 
-def _type_with_wtype_soft_newlines(text: str) -> bool:
-    """Type text using wtype with soft newlines (Shift+Enter).
+def _ydotool_key(key: str) -> bool:
+    """Send a key combination using ydotool.
 
-    Intermediate newlines are sent as Shift+Enter (for text editors), while
-    trailing newlines are sent as Enter.
+    Args:
+        key: Key combo string (e.g. "shift+Return").
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    result = subprocess.run(
+        ["ydotool", "key", key],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        _logger.warning("ydotool key %s failed: %s", key, result.stderr)
+        return False
+    return True
+
+
+def _output_via_ydotool(text: str, config: Config) -> bool:
+    """Output text using ydotool (uinput-based, works on all compositors).
+
+    Args:
+        text: The text to type.
+        config: Configuration.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    _logger.debug("Injecting text via ydotool (%d chars)", len(text))
+    # Brief delay to let modifier keys from the hotkey fully release
+    time.sleep(0.2)
+
+    try:
+        if config.soft_newlines and "\n" in text:
+            ok = _ydotool_type_soft_newlines(text)
+        else:
+            ok = _ydotool_type(text)
+
+        if not ok:
+            return False
+
+        if config.sound_effects:
+            play_sound(SoundEvent.COMPLETE)
+        return True
+    except Exception:
+        _logger.warning("ydotool failed", exc_info=True)
+        return False
+
+
+def _ydotool_type_soft_newlines(text: str) -> bool:
+    """Type text using ydotool with Shift+Enter for intermediate newlines.
 
     Args:
         text: The text to type, may contain newlines.
@@ -230,45 +136,23 @@ def _type_with_wtype_soft_newlines(text: str) -> bool:
     """
     has_trailing = text.endswith("\n")
     lines = text.split("\n")
-    # Remove empty trailing element if text ended with newline
-    if has_trailing and lines and lines[-1] == "":
+    if has_trailing and lines[-1] == "":
         lines = lines[:-1]
 
     for i, line in enumerate(lines):
         if line:
-            if not _type_with_wtype(line):
+            if not _ydotool_type(line):
                 return False
 
         is_last = i == len(lines) - 1
         if not is_last:
-            # Soft newline: Shift+Enter
-            if not _send_wtype_key("shift+Return"):
-                _logger.warning("wtype shift+Return failed")
+            if not _ydotool_key("shift+Return"):
                 return False
         elif has_trailing:
-            # Final trailing newline: Enter
-            if not _send_wtype_key("Return"):
-                _logger.warning("wtype Return failed")
+            if not _ydotool_key("Return"):
                 return False
 
     return True
-
-
-def _send_wtype_key(key: str) -> bool:
-    """Send a key combination using wtype.
-
-    Args:
-        key: The key combination to send (e.g., "shift+Return").
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    result = subprocess.run(
-        ["wtype", "-k", key],
-        capture_output=True,
-        timeout=10,
-    )
-    return result.returncode == 0
 
 
 def test_injection() -> bool:
@@ -297,9 +181,9 @@ def test_injection() -> bool:
         _injection_checked_at = now
         return capable
 
-    # On Wayland, check for wtype
+    # On Wayland, require ydotool
     if is_wayland():
-        return cache_result(_has_wtype())
+        return cache_result(_has_ydotool())
 
     if not _PYNPUT_AVAILABLE:
         _warn_pynput_missing()
@@ -341,10 +225,6 @@ def output_text(
     if mode != "injection":
         return _output_via_clipboard(text, config)
 
-    if not _PYNPUT_AVAILABLE:
-        _warn_pynput_missing()
-        return _output_via_clipboard(text, config)
-
     return _output_via_injection(text, window_info, config)
 
 
@@ -358,7 +238,7 @@ def _type_with_soft_newlines(kb: Controller, text: str) -> None:
     has_trailing = text.endswith("\n")
     lines = text.split("\n")
     # Remove empty trailing element if text ended with newline
-    if has_trailing and lines and lines[-1] == "":
+    if has_trailing and lines[-1] == "":
         lines = lines[:-1]
 
     for i, line in enumerate(lines):
@@ -393,11 +273,15 @@ def _output_via_injection(
     Returns:
         True if successful, False otherwise.
     """
-    # On Wayland, use wtype
+    # On Wayland, use ydotool
     if is_wayland():
-        if _has_wtype():
-            return _output_via_wtype(text, config)
-        _logger.warning("wtype not available; falling back to clipboard")
+        if _has_ydotool():
+            return _output_via_ydotool(text, config)
+        _logger.warning("ydotool not available; falling back to clipboard")
+        return _output_via_clipboard(text, config)
+
+    if not _PYNPUT_AVAILABLE:
+        _warn_pynput_missing()
         return _output_via_clipboard(text, config)
 
     # Restore focus to original window if provided
@@ -414,7 +298,7 @@ def _output_via_injection(
             kb.type(text)
 
         if config.sound_effects:
-            play_sound("complete")
+            play_sound(SoundEvent.COMPLETE)
 
         return True
     except Exception:
@@ -445,12 +329,12 @@ def _output_via_clipboard(text: str, config: Config) -> bool:
         pyperclip.copy(text)
 
         if config.sound_effects:
-            play_sound("complete")
+            play_sound(SoundEvent.COMPLETE)
 
         return True
     except Exception:
         if config.sound_effects:
-            play_sound("error")
+            play_sound(SoundEvent.ERROR)
         _logger.warning("Clipboard output failed", exc_info=True)
         return False
 

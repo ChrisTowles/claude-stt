@@ -7,7 +7,7 @@ import numpy as np
 class STTEngine(Protocol):
     """Protocol for STT engines."""
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "auto") -> str:
         """Transcribe audio to text.
 
         Args:

@@ -187,7 +187,10 @@ def _check_platform_requirements() -> None:
         )
     elif platform == "linux":
         if is_wayland():
-            _print_warn("Wayland detected; hotkeys/injection may be limited.")
+            if shutil.which("ydotool") is None:
+                _print_error("ydotool is required on Wayland but was not found.")
+                _print_error("Install: sudo apt install ydotool (Debian/Ubuntu).")
+                raise SystemExit(1)
         if shutil.which("xdotool") is None:
             _print_warn("xdotool not found; window focus restore disabled.")
             _print_warn("Install: sudo apt install xdotool (Debian/Ubuntu).")

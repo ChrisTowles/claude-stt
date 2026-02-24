@@ -55,13 +55,16 @@ class Config:
     # Only the final trailing newline (if any) becomes a real Enter
     soft_newlines: bool = True
 
+    # Language for transcription ("auto" = detect, or ISO 639-1 code e.g. "en")
+    language: str = "auto"
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the configuration directory path."""
         override = os.environ.get("CLAUDE_STT_CONFIG_DIR")
         if override:
             return Path(override).expanduser()
-        return Path.home() / ".claude" / "plugins" / "claude-stt"
+        return Path.home() / ".config" / "claude-stt"
 
     @classmethod
     def _legacy_config_path(cls) -> Path | None:
@@ -112,6 +115,7 @@ class Config:
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
                 improve_text=stt_config.get("improve_text", cls.improve_text),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
+                language=stt_config.get("language", cls.language),
             )
             config = config.validate()
             if legacy_path and tomli_w is not None:
@@ -151,6 +155,7 @@ class Config:
                 "sound_effects": self.sound_effects,
                 "improve_text": self.improve_text,
                 "soft_newlines": self.soft_newlines,
+                "language": self.language,
             }
         }
 

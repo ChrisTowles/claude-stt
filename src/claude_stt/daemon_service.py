@@ -18,7 +18,7 @@ from .errors import EngineError, HotkeyError, RecorderError
 from .hotkey import HotkeyListener
 from .keyboard import output_text
 from .recorder import AudioRecorder, RecorderConfig
-from .sounds import play_sound
+from .sounds import SoundEvent, play_sound
 from .text_improver import improve_text
 from .window import get_active_window, WindowInfo
 
@@ -131,7 +131,7 @@ class STTDaemon:
             db = 20 * np.log10(max(rms, 1e-10))
             self._logger.info("Transcribing audio (%d samples, %.1f dB)...", len(audio), db)
             try:
-                text = self._engine.transcribe(audio, self.config.sample_rate)
+                text = self._engine.transcribe(audio, self.config.sample_rate, self.config.language)
             except Exception:
                 self._logger.exception("Transcription failed")
                 continue
@@ -162,7 +162,7 @@ class STTDaemon:
     def _play_warning(self) -> None:
         """Play a warning sound if sound effects are enabled."""
         if self.config.sound_effects:
-            play_sound("warning")
+            play_sound(SoundEvent.WARNING)
 
     def _on_recording_start(self):
         """Called when recording should start."""
@@ -180,12 +180,12 @@ class STTDaemon:
             if self._recorder and self._recorder.start():
                 self._logger.info("Recording started")
                 if self.config.sound_effects:
-                    play_sound("start")
+                    play_sound(SoundEvent.COMPLETE)
             else:
                 self._logger.error("Audio recorder failed to start")
                 self._recording = False
                 if self.config.sound_effects:
-                    play_sound("error")
+                    play_sound(SoundEvent.ERROR)
 
     def _on_recording_stop(self):
         """Called when recording should stop."""
@@ -205,7 +205,7 @@ class STTDaemon:
 
             self._logger.info("Recording stopped (%.1fs)", elapsed)
             if self.config.sound_effects:
-                play_sound("stop")
+                play_sound(SoundEvent.STOP)
 
         # Transcribe outside the lock
         if audio is not None and len(audio) > 0:
@@ -214,7 +214,7 @@ class STTDaemon:
             except queue.Full:
                 self._logger.warning("Dropping transcription; queue is full")
         elif self.config.sound_effects:
-            play_sound("warning")
+            play_sound(SoundEvent.WARNING)
 
     def _check_max_recording_time(self) -> None:
         """Check if max recording time has been reached."""
@@ -227,7 +227,7 @@ class STTDaemon:
         # Warning at 30 seconds before max
         if max_seconds > 30 and max_seconds - 30 <= elapsed < max_seconds - 29:
             if self.config.sound_effects:
-                play_sound("warning")
+                play_sound(SoundEvent.WARNING)
 
         if elapsed >= max_seconds:
             self._on_recording_stop()
@@ -249,6 +249,8 @@ class STTDaemon:
             raise SystemExit(1)
 
         self._logger.info("Model loaded. Ready for voice input.")
+        if self.config.sound_effects:
+            play_sound(SoundEvent.READY)
 
         # Start hotkey listener
         if not self._hotkey.start():
@@ -306,4 +308,6 @@ class STTDaemon:
         if self._hotkey:
             self._hotkey.stop()
 
+        if self.config.sound_effects:
+            play_sound(SoundEvent.SHUTDOWN)
         self._logger.info("claude-stt daemon stopped.")

@@ -56,13 +56,16 @@ class WhisperEngine:
             self._logger.exception("Failed to load Whisper model")
             return False
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "auto") -> str:
         if not self.load_model():
             return ""
         try:
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
-            segments, _info = self._model.transcribe(audio)
+            kwargs = {}
+            if language != "auto":
+                kwargs["language"] = language
+            segments, _info = self._model.transcribe(audio, **kwargs)
             text = " ".join(segment.text.strip() for segment in segments)
             return text.strip()
         except Exception:

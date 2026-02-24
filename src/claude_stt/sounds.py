@@ -8,29 +8,42 @@ import logging
 import platform
 import shutil
 import subprocess
+from enum import Enum
 from pathlib import Path
-from typing import Literal
 
-SoundEvent = Literal["start", "stop", "complete", "error", "warning"]
 _logger = logging.getLogger(__name__)
-
-# Bundled sounds (CC0, Kenney Interface Sounds)
 _ASSETS_DIR = Path(__file__).parent / "assets"
-SOUNDS: dict[str, Path] = {
-    "start": _ASSETS_DIR / "start.ogg",
-    "stop": _ASSETS_DIR / "stop.ogg",
-    "complete": _ASSETS_DIR / "complete.ogg",
-    "error": _ASSETS_DIR / "error.ogg",
-    "warning": _ASSETS_DIR / "warning.ogg",
+
+
+class SoundEvent(Enum):
+    START = "start"
+    STOP = "stop"
+    COMPLETE = "complete"
+    ERROR = "error"
+    WARNING = "warning"
+    READY = "ready"
+    SHUTDOWN = "shutdown"
+
+
+SOUNDS: dict[SoundEvent, Path] = {
+    SoundEvent.START: _ASSETS_DIR / "start.ogg",
+    SoundEvent.STOP: _ASSETS_DIR / "stop.ogg",
+    SoundEvent.COMPLETE: _ASSETS_DIR / "complete.ogg",
+    SoundEvent.ERROR: _ASSETS_DIR / "error.ogg",
+    SoundEvent.WARNING: _ASSETS_DIR / "warning.ogg",
+    SoundEvent.READY: _ASSETS_DIR / "ready.ogg",
+    SoundEvent.SHUTDOWN: _ASSETS_DIR / "shutdown.ogg",
 }
 
 # Linux desktop notification messages (requires notify-send / libnotify-bin)
-LINUX_NOTIFICATIONS: dict[str, tuple[str, str]] = {
-    "start": ("Claude STT", "Recording..."),
-    "stop": ("Claude STT", "Recording stopped"),
-    "complete": ("Claude STT", "Text injected"),
-    "error": ("Claude STT", "Error"),
-    "warning": ("Claude STT", "Warning — no speech detected"),
+LINUX_NOTIFICATIONS: dict[SoundEvent, tuple[str, str]] = {
+    SoundEvent.START: ("Claude STT", "Recording..."),
+    SoundEvent.STOP: ("Claude STT", "Recording stopped"),
+    SoundEvent.COMPLETE: ("Claude STT", "Text injected"),
+    SoundEvent.ERROR: ("Claude STT", "Error"),
+    SoundEvent.WARNING: ("Claude STT", "Warning — no speech detected"),
+    SoundEvent.READY: ("Claude STT", "Ready for voice input"),
+    SoundEvent.SHUTDOWN: ("Claude STT", "Daemon stopped"),
 }
 
 
@@ -49,7 +62,7 @@ def play_sound(event: SoundEvent) -> None:
 
         sound_file = SOUNDS.get(event)
         if not sound_file or not sound_file.exists():
-            _logger.debug("Sound file missing for event: %s", event)
+            _logger.debug("Sound file missing for event: %s", event.value)
             return
 
         _play_sound_file(str(sound_file), system)
@@ -57,7 +70,7 @@ def play_sound(event: SoundEvent) -> None:
         if system == "Linux":
             _send_linux_notification(event)
     except Exception:
-        _logger.debug("Sound playback failed for event: %s", event, exc_info=True)
+        _logger.debug("Sound playback failed for event: %s", event.value, exc_info=True)
 
 
 def _play_sound_file(sound_file: str, system: str) -> None:
@@ -99,7 +112,7 @@ def _send_linux_notification(event: SoundEvent) -> None:
     if not notification:
         return
     title, body = notification
-    urgency = "critical" if event in ("error", "warning") else "low"
+    urgency = "critical" if event in (SoundEvent.ERROR, SoundEvent.WARNING) else "low"
     subprocess.Popen(
         ["notify-send", "--urgency", urgency, "--expire-time", "2000",
          "--app-name", "claude-stt", title, body],
@@ -114,11 +127,11 @@ def _play_windows_sound(event: SoundEvent) -> None:
         import winsound
 
         sound_map = {
-            "start": winsound.MB_OK,
-            "stop": winsound.MB_OK,
-            "complete": winsound.MB_OK,
-            "error": winsound.MB_ICONHAND,
-            "warning": winsound.MB_ICONEXCLAMATION,
+            SoundEvent.START: winsound.MB_OK,
+            SoundEvent.STOP: winsound.MB_OK,
+            SoundEvent.COMPLETE: winsound.MB_OK,
+            SoundEvent.ERROR: winsound.MB_ICONHAND,
+            SoundEvent.WARNING: winsound.MB_ICONEXCLAMATION,
         }
 
         sound_type = sound_map.get(event, winsound.MB_OK)

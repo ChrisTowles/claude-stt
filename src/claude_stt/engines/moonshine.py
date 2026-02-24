@@ -63,7 +63,7 @@ class MoonshineEngine:
             self._logger.exception("Failed to load Moonshine model")
             return False
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "auto") -> str:
         """Transcribe audio to text.
 
         Args:

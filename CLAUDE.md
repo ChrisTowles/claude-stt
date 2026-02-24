@@ -37,7 +37,7 @@ uv run ruff check src/
 - `engines/` - STT engine implementations (Moonshine default, Whisper optional)
 - `keyboard.py` - Text output via keyboard injection or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
-- `config.py` - TOML-based config with validation, stored in `~/.claude/plugins/claude-stt/`
+- `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`
 
 ### Flow
 
@@ -54,6 +54,10 @@ Transcription runs in a dedicated worker thread to avoid blocking the hotkey lis
 - `hooks/hooks.json` - Claude Code plugin hooks
 - `scripts/setup.py` - Bootstrap script that handles venv creation, dependency install, model download
 - `.claude-plugin/plugin.json` - Plugin metadata
+
+## Task Tracking
+
+Always use the task system (TaskCreate/TaskUpdate) to track objectives, especially when handling multiple tasks simultaneously. Create tasks before starting work and mark them completed when done.
 
 ## Version Bumps
 
