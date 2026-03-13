@@ -30,6 +30,8 @@ class Config:
 
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"
+    improve_hotkey: str = "cmd+alt+d"
+    improve_model: str = "haiku"
     mode: Literal["push-to-talk", "toggle"] = "toggle"
 
     # Engine settings
@@ -45,9 +47,6 @@ class Config:
 
     # Feedback settings
     sound_effects: bool = True
-
-    # Text improvement (uses Claude CLI)
-    improve_text: bool = False
 
     # Use Shift+Enter for newlines (soft newline) instead of Enter
     # Only the final trailing newline (if any) becomes a real Enter
@@ -96,7 +95,8 @@ class Config:
                 audio_device=stt_config.get("audio_device", cls.audio_device),
                 output_mode=stt_config.get("output_mode", cls.output_mode),
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
-                improve_text=stt_config.get("improve_text", cls.improve_text),
+                improve_hotkey=stt_config.get("improve_hotkey", cls.improve_hotkey),
+                improve_model=stt_config.get("improve_model", cls.improve_model),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
                 language=stt_config.get("language", cls.language),
             )
@@ -124,7 +124,8 @@ class Config:
                 "audio_device": self.audio_device,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
-                "improve_text": self.improve_text,
+                "improve_hotkey": self.improve_hotkey,
+                "improve_model": self.improve_model,
                 "soft_newlines": self.soft_newlines,
                 "language": self.language,
             }

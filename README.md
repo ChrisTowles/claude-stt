@@ -50,7 +50,7 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 | `output_mode` | `auto`, `injection`, `clipboard` | `auto` | How text is inserted |
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
 | `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
-| `improve_text` | `true`, `false` | `false` | Fix grammar/punctuation via Claude CLI |
+| `improve_hotkey` | Hotkey combo | `cmd+alt+d` | Hotkey to record + fix grammar via Claude CLI |
 | `max_recording_seconds` | 1-600 | 300 | Maximum recording duration |
 | `audio_device` | Device index or null | null | Audio input device (null = system default) |
 

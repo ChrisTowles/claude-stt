@@ -39,14 +39,16 @@ class STTDaemon:
         self._recorder: Optional[AudioRecorder] = None
         self._engine: Optional[WhisperEngine] = None
         self._hotkey: Optional[HotkeyListener] = None
+        self._improve_hotkey: Optional[HotkeyListener] = None
 
         # Recording state
         self._record_start_time: float = 0
         self._original_window: Optional[WindowInfo] = None
+        self._pending_improve: bool = False
         # Threading
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._transcribe_queue: "queue.Queue[Optional[tuple[object, Optional[WindowInfo]]]]" = (
+        self._transcribe_queue: "queue.Queue[Optional[tuple[object, Optional[WindowInfo], bool]]]" = (
             queue.Queue(maxsize=2)
         )
         self._transcribe_thread: Optional[threading.Thread] = None
@@ -93,6 +95,13 @@ class STTDaemon:
                 on_stop=self._on_recording_stop,
                 mode=self.config.mode,
             )
+
+            self._improve_hotkey = HotkeyListener(
+                hotkey=self.config.improve_hotkey,
+                on_start=self._on_improve_recording_start,
+                on_stop=self._on_recording_stop,
+                mode=self.config.mode,
+            )
         except (RecorderError, EngineError, HotkeyError) as exc:
             self._logger.error("%s", exc)
             return False
@@ -121,7 +130,7 @@ class STTDaemon:
             if item is None:
                 break
 
-            audio, window_info = item
+            audio, window_info, should_improve = item
             if not self._engine:
                 continue
 
@@ -148,10 +157,10 @@ class STTDaemon:
                 self._play_warning()
                 continue
 
-            # Improve text with Claude if enabled
-            if self.config.improve_text:
-                self._logger.debug("Improving text with Claude...")
-                text = improve_text(text)
+            # Improve text with Claude if triggered via improve hotkey
+            if should_improve:
+                self._logger.info("Improving text with Claude (%s)...", self.config.improve_model)
+                text = improve_text(text, model=self.config.improve_model)
 
             display_text = text[:100] + "..." if len(text) > 100 else text
             self._logger.info("Transcribed: %s", display_text)
@@ -163,13 +172,22 @@ class STTDaemon:
         if self.config.sound_effects:
             play_sound(SoundEvent.WARNING)
 
+    def _on_improve_recording_start(self):
+        """Called when improve-hotkey recording should start."""
+        self._start_recording(improve=True)
+
     def _on_recording_start(self):
         """Called when recording should start."""
+        self._start_recording(improve=False)
+
+    def _start_recording(self, improve: bool):
+        """Shared recording start logic."""
         with self._lock:
             if self._recording:
                 return
 
             self._recording = True
+            self._pending_improve = improve
             self._record_start_time = time.time()
 
             # Capture the active window
@@ -177,7 +195,7 @@ class STTDaemon:
 
             # Start recording
             if self._recorder and self._recorder.start():
-                self._logger.info("Recording started")
+                self._logger.info("Recording started (improve=%s)", improve)
                 if self.config.sound_effects:
                     play_sound(SoundEvent.COMPLETE)
             else:
@@ -190,11 +208,13 @@ class STTDaemon:
         """Called when recording should stop."""
         audio = None
         window_info = None
+        should_improve = False
         with self._lock:
             if not self._recording:
                 return
 
             self._recording = False
+            should_improve = self._pending_improve
             elapsed = time.time() - self._record_start_time
 
             # Stop recording
@@ -209,7 +229,7 @@ class STTDaemon:
         # Transcribe outside the lock
         if audio is not None and len(audio) > 0:
             try:
-                self._transcribe_queue.put_nowait((audio, window_info))
+                self._transcribe_queue.put_nowait((audio, window_info, should_improve))
             except queue.Full:
                 self._logger.warning("Dropping transcription; queue is full")
         elif self.config.sound_effects:
@@ -235,6 +255,7 @@ class STTDaemon:
         """Run the daemon main loop."""
         self._logger.info("claude-stt daemon starting...")
         self._logger.info("Hotkey: %s", self.config.hotkey)
+        self._logger.info("Improve hotkey: %s", self.config.improve_hotkey)
         self._logger.info("Engine: whisper (%s)", self.config.whisper_model)
         self._logger.info("Mode: %s", self.config.mode)
 
@@ -247,13 +268,21 @@ class STTDaemon:
             self._logger.error("Failed to load STT model")
             raise SystemExit(1)
 
-        self._logger.info("Model loaded. Ready for voice input.")
+        self._logger.info(
+            "Model loaded. Ready for voice input. Hotkeys: %s (transcribe), %s (improve)",
+            self.config.hotkey,
+            self.config.improve_hotkey,
+        )
         if self.config.sound_effects:
             play_sound(SoundEvent.READY)
 
-        # Start hotkey listener
+        # Start hotkey listeners
         if not self._hotkey.start():
             self._logger.error("Failed to start hotkey listener")
+            raise SystemExit(1)
+
+        if not self._improve_hotkey.start():
+            self._logger.error("Failed to start improve hotkey listener")
             raise SystemExit(1)
 
         self._running = True
@@ -306,6 +335,9 @@ class STTDaemon:
 
         if self._hotkey:
             self._hotkey.stop()
+
+        if self._improve_hotkey:
+            self._improve_hotkey.stop()
 
         if self.config.sound_effects:
             play_sound(SoundEvent.SHUTDOWN)

@@ -403,6 +403,7 @@ def daemon_status():
     config = Config.load().validate()
     logger.info("Config path: %s", Config.get_config_path())
     logger.info("Hotkey: %s", config.hotkey)
+    logger.info("Improve hotkey: %s", config.improve_hotkey)
     logger.info("Mode: %s", config.mode)
     logger.info("Engine: whisper (%s)", config.whisper_model)
 

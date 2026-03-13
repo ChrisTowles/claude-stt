@@ -45,11 +45,12 @@ _IMPROVE_PROMPT = (
 )
 
 
-def improve_text(text: str, timeout: float = 30.0) -> str:
+def improve_text(text: str, model: str = "haiku", timeout: float = 30.0) -> str:
     """Improve transcribed text using Claude CLI.
 
     Args:
         text: Raw transcribed text.
+        model: Claude model to use.
         timeout: Max seconds to wait for response.
 
     Returns:
@@ -62,7 +63,7 @@ def improve_text(text: str, timeout: float = 30.0) -> str:
         result = subprocess.run(
             [
                 "claude",
-                "--model", "haiku",
+                "--model", model,
                 "--print",
                 "-p", f"{_IMPROVE_PROMPT}\n\nText: {text}",
             ],

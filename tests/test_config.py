@@ -4,6 +4,10 @@ from claude_stt.config import Config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_improve_hotkey_default(self):
+        config = Config()
+        self.assertEqual(config.improve_hotkey, "cmd+alt+d")
+
     def test_config_validation_clamps_invalid_values(self):
         config = Config(
             mode="bad",
