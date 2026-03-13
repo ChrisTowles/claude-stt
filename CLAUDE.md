@@ -5,20 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies (uv preferred)
-uv sync --python 3.12 --extra dev
+# New machine setup (installs uv if needed + all deps)
+./install.sh
 
-# Or bootstrap without uv (creates local .venv)
-python scripts/setup.py --dev --skip-audio-test --skip-model-download --no-start
+# Or manually
+uv sync --python 3.12 --extra dev
 
 # Run tests
 uv run python -m unittest discover -s tests
 
 # Run single test
 uv run python -m unittest tests.test_config
-
-# Test locally with Claude Code
-claude --plugin-dir .
 
 # Lint (ruff)
 uv run ruff check src/
@@ -48,17 +45,14 @@ Hotkey press → AudioRecorder.start() → [user speaks] → Hotkey release
 
 Transcription runs in a dedicated worker thread to avoid blocking the hotkey listener.
 
-### Scripts
-
-- `scripts/setup.py` - Bootstrap script that handles venv creation, dependency install, model download
-
 ## Task Tracking
 
 Always use the task system (TaskCreate/TaskUpdate) to track objectives, especially when handling multiple tasks simultaneously. Create tasks before starting work and mark them completed when done.
 
+## Git Identity
+
+This repo uses the `ChrisTowles` GitHub account. **Pushing to this repo** — use `./scripts/git-push.sh` instead of `git push`. On macOS it switches to the `ChrisTowles` gh account, pushes, and switches back. On Linux it's a passthrough.
+
 ## Version Bumps
 
-Update version in three files:
-- `pyproject.toml`
-- `.claude-plugin/plugin.json`
-- `.claude-plugin/marketplace.json`
+Update version in `pyproject.toml`.
