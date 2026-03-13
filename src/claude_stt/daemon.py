@@ -14,7 +14,7 @@ from typing import Optional
 
 from .config import Config
 from .engines.whisper import WhisperEngine
-from .errors import EngineError, HotkeyError
+from .errors import HotkeyError
 from .hotkey import HotkeyListener
 from .keyboard import test_injection
 from .daemon_service import STTDaemon
@@ -25,13 +25,6 @@ logger = logging.getLogger(__name__)
 def get_pid_file() -> Path:
     """Get the PID file path."""
     return Config.get_config_dir() / "daemon.pid"
-
-
-def _get_plugin_root() -> Path:
-    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
-    if env_root:
-        return Path(env_root)
-    return Path(__file__).resolve().parents[2]
 
 
 def _read_pid_file() -> Optional[dict]:
@@ -229,7 +222,6 @@ def _spawn_background() -> bool:
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
-    env.setdefault("CLAUDE_PLUGIN_ROOT", str(_get_plugin_root()))
     cmd = [sys.executable, "-m", "claude_stt.daemon", "run"]
 
     creationflags = 0

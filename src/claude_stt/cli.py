@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from typing import Sequence
 
 from . import __version__
 from .daemon import main as daemon_main
-from .setup import main as setup_main
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["setup", "start", "stop", "status", "run", "daemon"],
+        choices=["start", "stop", "status", "run", "daemon"],
         default="daemon",
         help="Command to execute (default: daemon).",
     )
@@ -40,9 +38,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.version:
         print(__version__)
         return 0
-
-    if args.command == "setup":
-        return setup_main(list(args.args))
 
     if args.command == "daemon":
         if not args.args:

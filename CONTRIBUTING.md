@@ -19,12 +19,6 @@ cd claude-stt
 
 # Install dependencies (uv preferred)
 uv sync --python 3.12 --extra dev
-
-# Or use the bootstrapper (uv optional, falls back to local venv)
-python scripts/setup.py --dev --skip-audio-test --skip-model-download --no-start
-
-# Test locally with Claude Code
-claude --plugin-dir .
 ```
 
 ## Tests
@@ -46,29 +40,6 @@ uv run python -m unittest discover -s tests
 - Include tests or explain why they are not needed
 - Link issues when relevant
 
-## Releasing New Versions
+## Versioning
 
-When shipping a new version:
-
-1. **Update version numbers** in all three files:
-   - `pyproject.toml` → `version = "X.Y.Z"`
-   - `.claude-plugin/plugin.json` → `"version": "X.Y.Z"`
-   - `.claude-plugin/marketplace.json` → `"version": "X.Y.Z"`
-
-2. **Commit and push** to main branch
-
-### How Users Get Updates
-
-Claude Code plugins support updates through the `/plugin` interface:
-
-- **Update now** — Fetches latest from main branch, installs immediately
-- **Mark for update** — Stages update for later
-
-Claude Code compares the `version` field in `plugin.json` against the installed version.
-
-### Version Strategy
-
-We use semantic versioning (`MAJOR.MINOR.PATCH`):
-- **PATCH** (0.0.x): Bug fixes, minor improvements
-- **MINOR** (0.x.0): New features, non-breaking changes
-- **MAJOR** (x.0.0): Breaking changes
+We use semantic versioning (`MAJOR.MINOR.PATCH`) in `pyproject.toml`.

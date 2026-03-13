@@ -99,6 +99,25 @@ class AudioRecorder:
         except Exception:
             return []
 
+    def _resolve_device(self) -> int | str | None:
+        """Resolve configured device to an index, matching by name if needed."""
+        device = self.config.device
+        if device is None or sd is None:
+            return None
+        if isinstance(device, int):
+            return device
+        # String device name — find first input device matching the name
+        try:
+            devices = sd.query_devices()
+            for i, d in enumerate(devices):
+                if d["max_input_channels"] > 0 and device.lower() in d["name"].lower():
+                    self._logger.info("Resolved device '%s' to index %d (%s)", device, i, d["name"])
+                    return i
+        except Exception:
+            self._logger.debug("Failed to query devices for name resolution", exc_info=True)
+        self._logger.warning("Device '%s' not found; using system default", device)
+        return None
+
     def start(self) -> bool:
         """Start recording audio.
 
@@ -127,12 +146,13 @@ class AudioRecorder:
                 with self._lock:
                     self._recorded_chunks.append(indata.copy())
 
+            resolved_device = self._resolve_device()
             self._stream = sd.InputStream(
                 samplerate=self.config.sample_rate,
                 channels=self.config.channels,
                 dtype=self.config.dtype,
                 blocksize=self.config.blocksize,
-                device=self.config.device,
+                device=resolved_device,
                 callback=callback,
             )
             self._stream.start()

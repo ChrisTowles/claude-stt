@@ -65,15 +65,6 @@ class Config:
         return Path.home() / ".config" / "claude-stt"
 
     @classmethod
-    def _legacy_config_path(cls) -> Path | None:
-        """Get legacy config path if it exists."""
-        plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
-        if not plugin_root:
-            return None
-        legacy_path = Path(plugin_root).expanduser() / "config.toml"
-        return legacy_path if legacy_path.exists() else None
-
-    @classmethod
     def get_config_path(cls) -> Path:
         """Get the configuration file path."""
         return cls.get_config_dir() / "config.toml"
@@ -82,19 +73,15 @@ class Config:
     def load(cls) -> "Config":
         """Load configuration from file, or return defaults."""
         config_path = cls.get_config_path()
-        legacy_path = None
         if not config_path.exists():
-            legacy_path = cls._legacy_config_path()
-            if legacy_path is None:
-                return cls()
+            return cls()
 
         if tomli is None:
             logger.warning("tomli not installed; using default config")
             return cls().validate()
 
         try:
-            source_path = legacy_path or config_path
-            with open(source_path, "rb") as f:
+            with open(config_path, "rb") as f:
                 data = tomli.load(f)
 
             stt_config = data.get("claude-stt", {})
@@ -113,18 +100,8 @@ class Config:
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
                 language=stt_config.get("language", cls.language),
             )
-            config = config.validate()
-            if legacy_path and tomli_w is not None:
-                try:
-                    config.save()
-                    logger.info(
-                        "Migrated config to %s", cls.get_config_path()
-                    )
-                except Exception:
-                    logger.exception("Failed to migrate legacy config")
-            return config
+            return config.validate()
         except Exception:
-            # If config is corrupted, return defaults
             logger.exception("Failed to load config; using defaults")
             return cls().validate()
 
