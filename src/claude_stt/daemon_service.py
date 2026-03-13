@@ -193,6 +193,21 @@ class STTDaemon:
             # Capture the active window
             self._original_window = get_active_window()
 
+            # Check if the focused app is excluded
+            if self._original_window and self._original_window.app_name:
+                app = self._original_window.app_name.lower()
+                for excluded in self.config.excluded_apps:
+                    if excluded.lower() in app:
+                        self._logger.info(
+                            "Skipping recording: %s is excluded", self._original_window.app_name
+                        )
+                        self._recording = False
+                        # Reset hotkey listener toggle state so next press works
+                        listener = self._improve_hotkey if improve else self._hotkey
+                        if listener:
+                            listener.reset_recording()
+                        return
+
             # Start recording
             if self._recorder and self._recorder.start():
                 self._logger.info("Recording started (improve=%s)", improve)

@@ -289,6 +289,11 @@ class HotkeyListener:
         """Check if listener is running."""
         return self._listener is not None and self._listener.is_alive()
 
+    def reset_recording(self) -> None:
+        """Reset the recording state (e.g. when recording was skipped)."""
+        with self._lock:
+            self._is_recording = False
+
     @property
     def is_recording(self) -> bool:
         """Check if currently in recording state."""

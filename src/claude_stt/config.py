@@ -55,6 +55,13 @@ class Config:
     # Language for transcription ("auto" = detect, or ISO 639-1 code e.g. "en")
     language: str = "auto"
 
+    # Apps to exclude from hotkey capture (case-insensitive substring match)
+    excluded_apps: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.excluded_apps is None:
+            self.excluded_apps = []
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the configuration directory path."""
@@ -99,6 +106,7 @@ class Config:
                 improve_model=stt_config.get("improve_model", cls.improve_model),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
                 language=stt_config.get("language", cls.language),
+                excluded_apps=stt_config.get("excluded_apps", []),
             )
             return config.validate()
         except Exception:
@@ -128,6 +136,7 @@ class Config:
                 "improve_model": self.improve_model,
                 "soft_newlines": self.soft_newlines,
                 "language": self.language,
+                "excluded_apps": self.excluded_apps,
             }
         }
 

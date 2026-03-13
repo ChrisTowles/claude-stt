@@ -4,6 +4,14 @@ from claude_stt.config import Config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_excluded_apps_default(self):
+        config = Config()
+        self.assertEqual(config.excluded_apps, [])
+
+    def test_excluded_apps_from_constructor(self):
+        config = Config(excluded_apps=["Claude", "Zoom"])
+        self.assertEqual(config.excluded_apps, ["Claude", "Zoom"])
+
     def test_improve_hotkey_default(self):
         config = Config()
         self.assertEqual(config.improve_hotkey, "cmd+alt+d")
