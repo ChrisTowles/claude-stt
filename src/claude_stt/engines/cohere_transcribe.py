@@ -18,6 +18,20 @@ except ImportError:
     pass
 
 
+def _detect_device() -> str:
+    """Auto-detect the best available device: CUDA -> MPS -> CPU."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
 class CohereTranscribeEngine:
     """Speech-to-text engine backed by CohereLabs/cohere-transcribe."""
 
@@ -29,7 +43,7 @@ class CohereTranscribeEngine:
         device: Optional[str] = None,
     ):
         self.model_name = model_name
-        self.device = device or os.environ.get("CLAUDE_STT_DEVICE", "cpu")
+        self.device = device or os.environ.get("CLAUDE_STT_DEVICE") or _detect_device()
         self._model = None
         self._processor = None
         self._logger = logging.getLogger(__name__)
@@ -51,6 +65,7 @@ class CohereTranscribeEngine:
             )
             self._model.to(self.device)
             self._model.eval()
+            self._logger.info("Loaded model on device: %s", self.device)
             return True
         except Exception:
             self._logger.exception("Failed to load Cohere Transcribe model")
