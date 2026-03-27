@@ -31,7 +31,7 @@ uv run ruff check src/
 - `daemon_service.py` - Runtime orchestration (`STTDaemon` class coordinates all components)
 - `hotkey.py` - Global hotkey listener using pynput (supports toggle and push-to-talk modes)
 - `recorder.py` - Audio capture via sounddevice
-- `engines/whisper.py` - Whisper STT engine (faster-whisper)
+- `engines/cohere_transcribe.py` - Cohere Transcribe STT engine (CohereLabs/cohere-transcribe-03-2026 via transformers). Auto-detects device: CUDA → MPS → CPU. Override with `CLAUDE_STT_DEVICE` env var.
 - `keyboard.py` - Text output via ydotool (Wayland), pynput (X11), or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
 - `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`

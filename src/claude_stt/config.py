@@ -94,7 +94,7 @@ class Config:
             config = cls(
                 hotkey=stt_config.get("hotkey", cls.hotkey),
                 mode=stt_config.get("mode", cls.mode),
-                stt_model=stt_config.get("stt_model", stt_config.get("whisper_model", cls.stt_model)),
+                stt_model=stt_config.get("stt_model", cls.stt_model),
                 sample_rate=stt_config.get("sample_rate", cls.sample_rate),
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
