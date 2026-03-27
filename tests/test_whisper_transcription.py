@@ -1,6 +1,6 @@
-"""End-to-end Whisper transcription tests using real audio samples.
+"""End-to-end Cohere Transcribe transcription tests using real audio samples.
 
-Downloads a LibriSpeech sample from HuggingFace and verifies Whisper
+Downloads a LibriSpeech sample from HuggingFace and verifies the
 engine produces correct transcriptions.
 """
 
@@ -12,7 +12,7 @@ from typing import ClassVar, Optional
 
 import numpy as np
 
-from claude_stt.engines.whisper import WhisperEngine, _whisper_available
+from claude_stt.engines.cohere_transcribe import CohereTranscribeEngine, _cohere_available
 
 
 def _download_sample_audio() -> tuple[np.ndarray, int]:
@@ -52,19 +52,19 @@ def _download_sample_audio() -> tuple[np.ndarray, int]:
     return audio, sr
 
 
-@unittest.skipUnless(_whisper_available, "faster-whisper not installed")
-class WhisperTranscriptionTests(unittest.TestCase):
-    """Test Whisper engine produces correct transcriptions from real audio."""
+@unittest.skipUnless(_cohere_available, "transformers not installed")
+class CohereTranscribeTests(unittest.TestCase):
+    """Test Cohere Transcribe engine produces correct transcriptions from real audio."""
 
-    _engine: ClassVar[Optional[WhisperEngine]] = None
+    _engine: ClassVar[Optional[CohereTranscribeEngine]] = None
     _audio: ClassVar[Optional[np.ndarray]] = None
     _sample_rate: ClassVar[int] = 16000
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Load Whisper model and download sample audio."""
-        cls._engine = WhisperEngine(model_name="medium")
-        assert cls._engine.load_model(), "Failed to load Whisper model"
+        """Load model and download sample audio."""
+        cls._engine = CohereTranscribeEngine()
+        assert cls._engine.load_model(), "Failed to load Cohere Transcribe model"
         cls._audio, cls._sample_rate = _download_sample_audio()
 
     def test_transcription_returns_nonempty_string(self) -> None:
@@ -90,7 +90,7 @@ class WhisperTranscriptionTests(unittest.TestCase):
         self.assertGreater(ratio, 0.85)
 
     def test_silence_returns_valid_string(self) -> None:
-        """Verify silence doesn't crash (may hallucinate, which is OK)."""
+        """Verify silence doesn't crash."""
         silence = np.zeros(32000, dtype=np.float32)
         result = self._engine.transcribe(silence, 16000)
         self.assertIsInstance(result, str)

@@ -12,7 +12,7 @@ from typing import Optional
 import numpy as np
 
 from .config import Config
-from .engines.whisper import WhisperEngine
+from .engines.cohere_transcribe import CohereTranscribeEngine
 from .errors import EngineError, HotkeyError, RecorderError
 from .hotkey import HotkeyListener
 from .keyboard import output_text
@@ -37,7 +37,7 @@ class STTDaemon:
 
         # Components
         self._recorder: Optional[AudioRecorder] = None
-        self._engine: Optional[WhisperEngine] = None
+        self._engine: Optional[CohereTranscribeEngine] = None
         self._hotkey: Optional[HotkeyListener] = None
         self._improve_hotkey: Optional[HotkeyListener] = None
 
@@ -83,7 +83,7 @@ class STTDaemon:
             except Exception:
                 self._logger.debug("Could not query audio device info", exc_info=True)
 
-            self._engine = WhisperEngine(model_name=self.config.whisper_model)
+            self._engine = CohereTranscribeEngine(model_name=self.config.stt_model)
             if not self._engine.is_available():
                 raise EngineError(
                     "STT engine not available. Run setup to install dependencies."
@@ -271,7 +271,7 @@ class STTDaemon:
         self._logger.info("claude-stt daemon starting...")
         self._logger.info("Hotkey: %s", self.config.hotkey)
         self._logger.info("Improve hotkey: %s", self.config.improve_hotkey)
-        self._logger.info("Engine: whisper (%s)", self.config.whisper_model)
+        self._logger.info("Engine: cohere-transcribe (%s)", self.config.stt_model)
         self._logger.info("Mode: %s", self.config.mode)
 
         if not self._init_components():

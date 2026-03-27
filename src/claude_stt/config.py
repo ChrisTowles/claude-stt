@@ -35,7 +35,7 @@ class Config:
     mode: Literal["push-to-talk", "toggle"] = "toggle"
 
     # Engine settings
-    whisper_model: str = "medium"
+    stt_model: str = "CohereLabs/cohere-transcribe-03-2026"
 
     # Audio settings
     sample_rate: int = 16000
@@ -94,7 +94,7 @@ class Config:
             config = cls(
                 hotkey=stt_config.get("hotkey", cls.hotkey),
                 mode=stt_config.get("mode", cls.mode),
-                whisper_model=stt_config.get("whisper_model", cls.whisper_model),
+                stt_model=stt_config.get("stt_model", stt_config.get("whisper_model", cls.stt_model)),
                 sample_rate=stt_config.get("sample_rate", cls.sample_rate),
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
@@ -126,7 +126,7 @@ class Config:
             "claude-stt": {
                 "hotkey": self.hotkey,
                 "mode": self.mode,
-                "whisper_model": self.whisper_model,
+                "stt_model": self.stt_model,
                 "sample_rate": self.sample_rate,
                 "max_recording_seconds": self.max_recording_seconds,
                 "audio_device": self.audio_device,
@@ -171,9 +171,9 @@ class Config:
             logger.warning("Invalid mode '%s'; defaulting to 'toggle'", self.mode)
             self.mode = "toggle"
 
-        if not isinstance(self.whisper_model, str) or not self.whisper_model.strip():
-            logger.warning("Invalid whisper_model; defaulting to 'medium'")
-            self.whisper_model = "medium"
+        if not isinstance(self.stt_model, str) or not self.stt_model.strip():
+            logger.warning("Invalid stt_model; defaulting to Cohere Transcribe")
+            self.stt_model = "CohereLabs/cohere-transcribe-03-2026"
 
         if self.output_mode not in ("injection", "clipboard", "auto"):
             logger.warning("Invalid output_mode '%s'; defaulting to 'auto'", self.output_mode)

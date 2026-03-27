@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
-from .engines.whisper import WhisperEngine
+from .engines.cohere_transcribe import CohereTranscribeEngine
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
 from .keyboard import test_injection
@@ -405,9 +405,9 @@ def daemon_status():
     logger.info("Hotkey: %s", config.hotkey)
     logger.info("Improve hotkey: %s", config.improve_hotkey)
     logger.info("Mode: %s", config.mode)
-    logger.info("Engine: whisper (%s)", config.whisper_model)
+    logger.info("Engine: cohere-transcribe (%s)", config.stt_model)
 
-    engine = WhisperEngine(model_name=config.whisper_model)
+    engine = CohereTranscribeEngine(model_name=config.stt_model)
     if engine.is_available():
         logger.info("Engine availability: ready")
     else:
