@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 import logging
-import queue
 import signal
+import shutil
+import subprocess
 import threading
 import time
 from typing import Optional
 
-import numpy as np
-
 from .config import Config
-from .engines.whisper import WhisperEngine
-from .errors import EngineError, HotkeyError, RecorderError
+from .errors import HotkeyError
 from .hotkey import HotkeyListener
-from .keyboard import output_text
-from .recorder import AudioRecorder, RecorderConfig
+from .keyboard import delete_chars, type_text_streaming
 from .sounds import SoundEvent, play_sound
-from .text_improver import improve_text
+from .web.server import WebSpeechServer
 from .window import get_active_window, WindowInfo
 
 
@@ -26,68 +23,34 @@ class STTDaemon:
     """Main daemon that coordinates all STT components."""
 
     def __init__(self, config: Optional[Config] = None):
-        """Initialize the daemon.
-
-        Args:
-            config: Configuration, or load from file if None.
-        """
         self.config = (config or Config.load()).validate()
         self._running = False
         self._recording = False
 
         # Components
-        self._recorder: Optional[AudioRecorder] = None
-        self._engine: Optional[WhisperEngine] = None
+        self._server: Optional[WebSpeechServer] = None
         self._hotkey: Optional[HotkeyListener] = None
-        self._improve_hotkey: Optional[HotkeyListener] = None
 
         # Recording state
         self._record_start_time: float = 0
         self._original_window: Optional[WindowInfo] = None
-        self._pending_improve: bool = False
+        self._typed_text: str = ""
+        self._chars_typed: int = 0
+
         # Threading
         self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._transcribe_queue: "queue.Queue[Optional[tuple[object, Optional[WindowInfo], bool]]]" = (
-            queue.Queue(maxsize=2)
-        )
-        self._transcribe_thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger(__name__)
 
     def _init_components(self) -> bool:
-        """Initialize all components.
-
-        Returns:
-            True if all components initialized successfully.
-        """
         try:
-            self._recorder = AudioRecorder(
-                RecorderConfig(
-                    sample_rate=self.config.sample_rate,
-                    max_recording_seconds=self.config.max_recording_seconds,
-                    device=self.config.audio_device,
-                )
+            self._server = WebSpeechServer(
+                port=self.config.ws_port,
+                on_interim=self._on_interim_text,
+                on_final=self._on_final_text,
+                on_end=self._on_recognition_end,
+                on_error=self._on_recognition_error,
+                on_ready=self._on_chrome_ready,
             )
-            if not self._recorder.is_available():
-                raise RecorderError("No audio input device available")
-
-            # Log audio device
-            try:
-                import sounddevice as sd
-                if self.config.audio_device is not None:
-                    device_info = sd.query_devices(self.config.audio_device)
-                    self._logger.info("Audio input: [%s] %s", self.config.audio_device, device_info['name'])
-                else:
-                    device_info = sd.query_devices(kind='input')
-                    self._logger.info("Audio input: %s (default)", device_info['name'])
-            except Exception:
-                self._logger.debug("Could not query audio device info", exc_info=True)
-
-            self._engine = WhisperEngine(model_name=self.config.whisper_model)
-            if not self._engine.is_available():
-                raise EngineError(
-                    "STT engine not available. Run setup to install dependencies."
-                )
 
             self._hotkey = HotkeyListener(
                 hotkey=self.config.hotkey,
@@ -95,170 +58,146 @@ class STTDaemon:
                 on_stop=self._on_recording_stop,
                 mode=self.config.mode,
             )
-
-            self._improve_hotkey = HotkeyListener(
-                hotkey=self.config.improve_hotkey,
-                on_start=self._on_improve_recording_start,
-                on_stop=self._on_recording_stop,
-                mode=self.config.mode,
-            )
-        except (RecorderError, EngineError, HotkeyError) as exc:
+        except HotkeyError as exc:
+            self._logger.warning("Hotkey listener failed: %s (SIGUSR1 toggle still works)", exc)
+            self._hotkey = None
+        except Exception as exc:
             self._logger.error("%s", exc)
             return False
 
-        self._start_transcription_worker()
         return True
 
-    def _start_transcription_worker(self) -> None:
-        if self._transcribe_thread is not None:
+    def _launch_chrome(self):
+        chrome = shutil.which("google-chrome") or shutil.which("chromium-browser") or shutil.which("chromium")
+        if not chrome:
+            self._logger.warning("Chrome not found — open http://127.0.0.1:%d manually", self.config.ws_port)
+            return
+        url = f"http://127.0.0.1:{self.config.ws_port}"
+        try:
+            subprocess.Popen(
+                [chrome, f"--app={url}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._logger.info("Launched Chrome app window: %s", url)
+        except Exception:
+            self._logger.warning("Failed to launch Chrome — open %s manually", url)
+
+    def _on_chrome_ready(self):
+        self._logger.info("Chrome Web Speech API connected and ready")
+
+    def _on_interim_text(self, text: str):
+        if not self._recording:
+            return
+        text = text.strip()
+        if not text or text == self._typed_text:
             return
 
-        self._transcribe_thread = threading.Thread(
-            target=self._transcribe_worker,
-            name="claude-stt-transcribe",
-            daemon=True,
-        )
-        self._transcribe_thread.start()
+        with self._lock:
+            if text.startswith(self._typed_text):
+                addition = text[len(self._typed_text):]
+                self._logger.info("Streaming: +%r", addition)
+                type_text_streaming(addition)
+            else:
+                self._logger.info("Streaming: correction, retyping (%d chars)", len(text))
+                if self._chars_typed > 0:
+                    delete_chars(self._chars_typed)
+                type_text_streaming(text)
+            self._chars_typed = len(text)
+            self._typed_text = text
 
-    def _transcribe_worker(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                item = self._transcribe_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
+    def _on_final_text(self, text: str):
+        if not self._recording:
+            return
+        text = text.strip()
+        if not text:
+            return
 
-            if item is None:
-                break
+        with self._lock:
+            if text == self._typed_text:
+                self._logger.info("Final matches streamed text")
+            elif text.startswith(self._typed_text):
+                addition = text[len(self._typed_text):]
+                self._logger.info("Final: appending %r", addition)
+                type_text_streaming(addition)
+            else:
+                self._logger.info("Final: correction, retyping (%d chars)", len(text))
+                if self._chars_typed > 0:
+                    delete_chars(self._chars_typed)
+                type_text_streaming(text)
+            self._chars_typed = len(text)
+            self._typed_text = text
 
-            audio, window_info, should_improve = item
-            if not self._engine:
-                continue
+    def _on_recognition_end(self):
+        if self._recording:
+            self._logger.debug("Recognition ended but still recording (Chrome will auto-restart)")
 
-            # Log audio level
-            rms = np.sqrt(np.mean(audio**2))
-            db = 20 * np.log10(max(rms, 1e-10))
-            self._logger.info("Transcribing audio (%d samples, %.1f dB)...", len(audio), db)
-            try:
-                text = self._engine.transcribe(audio, self.config.sample_rate, self.config.language)
-            except Exception:
-                self._logger.exception("Transcription failed")
-                continue
-
-            text = text.strip()
-            if not text:
-                self._logger.info("No speech detected")
-                self._play_warning()
-                continue
-
-            # Filter out STT hallucinations (short phantom phrases on silence/quick stops)
-            cleaned = text.lower().replace("thank you", "").strip()
-            if len(cleaned) <= 5:
-                self._logger.info("Filtered likely hallucination: %r", text)
-                self._play_warning()
-                continue
-
-            # Improve text with Claude if triggered via improve hotkey
-            if should_improve:
-                self._logger.info("Improving text with Claude (%s)...", self.config.improve_model)
-                text = improve_text(text, model=self.config.improve_model)
-
-            display_text = text[:100] + "..." if len(text) > 100 else text
-            self._logger.info("Transcribed: %s", display_text)
-            if not output_text(text, window_info, self.config):
-                self._logger.warning("Failed to output transcription")
-
-    def _play_warning(self) -> None:
-        """Play a warning sound if sound effects are enabled."""
-        if self.config.sound_effects:
+    def _on_recognition_error(self, error: str):
+        self._logger.warning("Speech recognition error: %s", error)
+        if error == "not-allowed":
+            self._logger.error("Microphone access denied in Chrome — grant permission and reload")
+        if self.config.sound_effects and error != "no-speech":
             play_sound(SoundEvent.WARNING)
 
-    def _on_improve_recording_start(self):
-        """Called when improve-hotkey recording should start."""
-        self._start_recording(improve=True)
-
     def _on_recording_start(self):
-        """Called when recording should start."""
-        self._start_recording(improve=False)
-
-    def _start_recording(self, improve: bool):
-        """Shared recording start logic."""
         with self._lock:
             if self._recording:
                 return
 
             self._recording = True
-            self._pending_improve = improve
             self._record_start_time = time.time()
-
-            # Capture the active window
+            self._typed_text = ""
+            self._chars_typed = 0
             self._original_window = get_active_window()
 
-            # Check if the focused app is excluded
             if self._original_window and self._original_window.app_name:
                 app = self._original_window.app_name.lower()
                 for excluded in self.config.excluded_apps:
                     if excluded.lower() in app:
-                        self._logger.info(
-                            "Skipping recording: %s is excluded", self._original_window.app_name
-                        )
+                        self._logger.info("Skipping: %s is excluded", self._original_window.app_name)
                         self._recording = False
-                        # Reset hotkey listener toggle state so next press works
-                        listener = self._improve_hotkey if improve else self._hotkey
-                        if listener:
-                            listener.reset_recording()
+                        if self._hotkey:
+                            self._hotkey.reset_recording()
                         return
 
-            # Start recording
-            if self._recorder and self._recorder.start():
-                self._logger.info("Recording started (improve=%s)", improve)
-                if self.config.sound_effects:
-                    play_sound(SoundEvent.COMPLETE)
-            else:
-                self._logger.error("Audio recorder failed to start")
+            if not self._server or not self._server.is_connected():
+                self._logger.error("Chrome not connected — open http://127.0.0.1:%d", self.config.ws_port)
                 self._recording = False
                 if self.config.sound_effects:
                     play_sound(SoundEvent.ERROR)
+                return
+
+            self._server.send_start()
+            self._logger.info("Recording started")
+            if self.config.sound_effects:
+                play_sound(SoundEvent.COMPLETE)
 
     def _on_recording_stop(self):
-        """Called when recording should stop."""
-        audio = None
-        window_info = None
-        should_improve = False
         with self._lock:
             if not self._recording:
                 return
 
             self._recording = False
-            should_improve = self._pending_improve
             elapsed = time.time() - self._record_start_time
-
-            # Stop recording
-            if self._recorder:
-                audio = self._recorder.stop()
-            window_info = self._original_window
-
             self._logger.info("Recording stopped (%.1fs)", elapsed)
+
+            if self._server and self._server.is_connected():
+                self._server.send_stop()
+
             if self.config.sound_effects:
                 play_sound(SoundEvent.STOP)
 
-        # Transcribe outside the lock
-        if audio is not None and len(audio) > 0:
-            try:
-                self._transcribe_queue.put_nowait((audio, window_info, should_improve))
-            except queue.Full:
-                self._logger.warning("Dropping transcription; queue is full")
-        elif self.config.sound_effects:
-            play_sound(SoundEvent.WARNING)
+            if self._typed_text:
+                display = self._typed_text[:100] + "..." if len(self._typed_text) > 100 else self._typed_text
+                self._logger.info("Final transcription: %s", display)
 
     def _check_max_recording_time(self) -> None:
-        """Check if max recording time has been reached."""
         if not self._recording:
             return
 
         elapsed = time.time() - self._record_start_time
         max_seconds = self.config.max_recording_seconds
 
-        # Warning at 30 seconds before max
         if max_seconds > 30 and max_seconds - 30 <= elapsed < max_seconds - 29:
             if self.config.sound_effects:
                 play_sound(SoundEvent.WARNING)
@@ -267,47 +206,43 @@ class STTDaemon:
             self._on_recording_stop()
 
     def run(self):
-        """Run the daemon main loop."""
         self._logger.info("claude-stt daemon starting...")
         self._logger.info("Hotkey: %s", self.config.hotkey)
-        self._logger.info("Improve hotkey: %s", self.config.improve_hotkey)
-        self._logger.info("Engine: whisper (%s)", self.config.whisper_model)
         self._logger.info("Mode: %s", self.config.mode)
+        self._logger.info("Web server port: %d", self.config.ws_port)
 
         if not self._init_components():
             raise SystemExit(1)
 
-        # Load the model
-        self._logger.info("Loading STT model...")
-        if not self._engine.load_model():
-            self._logger.error("Failed to load STT model")
+        if not self._server.start():
+            self._logger.error("Failed to start web server")
             raise SystemExit(1)
 
+        self._launch_chrome()
+
         self._logger.info(
-            "Model loaded. Ready for voice input. Hotkeys: %s (transcribe), %s (improve)",
-            self.config.hotkey,
-            self.config.improve_hotkey,
+            "Ready. Waiting for Chrome to connect at http://127.0.0.1:%d",
+            self.config.ws_port,
         )
         if self.config.sound_effects:
             play_sound(SoundEvent.READY)
 
-        # Start hotkey listeners
-        if not self._hotkey.start():
-            self._logger.error("Failed to start hotkey listener")
-            raise SystemExit(1)
-
-        if not self._improve_hotkey.start():
-            self._logger.error("Failed to start improve hotkey listener")
-            raise SystemExit(1)
+        if self._hotkey and not self._hotkey.start():
+            self._logger.warning("Hotkey listener failed to start (SIGUSR1 toggle still works)")
 
         self._running = True
 
-        # Handle shutdown signals
         def shutdown(signum, frame):
             self._logger.info("Shutting down...")
             self._running = False
 
+        _last_toggle = [0.0]
+
         def toggle_recording(signum, frame):
+            now = time.monotonic()
+            if now - _last_toggle[0] < 1.0:
+                return
+            _last_toggle[0] = now
             if self._recording:
                 self._logger.info("SIGUSR1: stopping recording")
                 self._on_recording_stop()
@@ -322,7 +257,6 @@ class STTDaemon:
         except Exception:
             self._logger.debug("Signal handlers unavailable", exc_info=True)
 
-        # Main loop
         try:
             while self._running:
                 self._check_max_recording_time()
@@ -331,28 +265,16 @@ class STTDaemon:
             self.stop()
 
     def stop(self):
-        """Stop the daemon."""
         self._running = False
-        self._stop_event.set()
 
-        try:
-            self._transcribe_queue.put_nowait(None)
-        except queue.Full:
-            pass
-
-        if self._transcribe_thread:
-            self._transcribe_thread.join(timeout=1.0)
-            if self._transcribe_thread.is_alive():
-                self._logger.warning("Transcribe thread did not exit cleanly")
-
-        if self._recording and self._recorder:
-            self._recorder.stop()
+        if self._recording and self._server:
+            self._server.send_stop()
 
         if self._hotkey:
             self._hotkey.stop()
 
-        if self._improve_hotkey:
-            self._improve_hotkey.stop()
+        if self._server:
+            self._server.stop()
 
         if self.config.sound_effects:
             play_sound(SoundEvent.SHUTDOWN)
