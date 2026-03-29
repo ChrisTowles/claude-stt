@@ -48,9 +48,6 @@ class Config:
     # Only the final trailing newline (if any) becomes a real Enter
     soft_newlines: bool = True
 
-    # Language for transcription ("auto" = detect, or ISO 639-1 code e.g. "en")
-    language: str = "auto"
-
     # Apps to exclude from hotkey capture (case-insensitive substring match)
     excluded_apps: list[str] = None  # type: ignore[assignment]
 
@@ -97,7 +94,6 @@ class Config:
                 output_mode=stt_config.get("output_mode", cls.output_mode),
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
-                language=stt_config.get("language", cls.language),
                 excluded_apps=stt_config.get("excluded_apps", []),
             )
             return config.validate()
@@ -123,7 +119,6 @@ class Config:
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
                 "soft_newlines": self.soft_newlines,
-                "language": self.language,
                 "excluded_apps": self.excluded_apps,
             }
         }

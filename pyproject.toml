@@ -16,14 +16,12 @@ dependencies = [
     "pyperclip>=1.8",
     "tomli>=2.0",
     "tomli-w>=1.0",
-    "pytest",
-    "ruff",
-    "httpx",
 ]
 
 [project.optional-dependencies]
 macos = ["pyobjc-framework-Cocoa"]
 windows = ["pywin32"]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 claude-stt = "claude_stt.cli:main"

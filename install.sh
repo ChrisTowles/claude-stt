@@ -9,6 +9,6 @@ case "$(uname -s)" in
 esac
 
 # Install dependencies
-uv sync --python 3.12 --extra dev $OS_EXTRA
+uv sync --python 3.12 $OS_EXTRA
 
 echo "Done. Run tests with: uv run python -m unittest discover -s tests"

@@ -158,7 +158,7 @@ class STTDaemon:
             self._server.send_start()
             self._logger.info("Recording started")
             if self.config.sound_effects:
-                play_sound(SoundEvent.COMPLETE)
+                play_sound(SoundEvent.START)
 
     def _on_recording_stop(self):
         with self._lock:

@@ -79,7 +79,7 @@ This sends SIGUSR1 to the running daemon to toggle recording.
 | Issue | Solution |
 |-------|----------|
 | Chrome window doesn't open | Open `http://localhost:18333` manually |
-| "Disconnected" in Chrome | Make sure daemon is running (`stt-run`) |
+| "Disconnected" in Chrome | Make sure daemon is running (`claude-stt run`) |
 | No audio / mic denied | Grant mic permission when Chrome prompts |
 | Text not appearing (Wayland) | Install ydotool: `sudo apt install ydotool` |
 
