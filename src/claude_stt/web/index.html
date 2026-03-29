@@ -6,8 +6,8 @@
 <title>Claude STT</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 2rem; }
-  .container { text-align: center; max-width: 500px; width: 100%; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 1.5rem; }
+  .container { text-align: center; max-width: 600px; width: 100%; }
   h1 { font-size: 1.5rem; margin-bottom: 0.5rem; font-weight: 300; }
   .subtitle { font-size: 0.8rem; color: #666; margin-bottom: 1.5rem; }
   .subtitle a { color: #666; text-decoration: none; }
@@ -22,13 +22,27 @@
 
   .timer { font-size: 0.85rem; color: #666; margin-bottom: 1rem; min-height: 1.2rem; font-variant-numeric: tabular-nums; }
 
-  .transcript-box { background: #16213e; border-radius: 8px; padding: 1rem; min-height: 80px; margin-bottom: 1.5rem; text-align: left; font-size: 0.95rem; line-height: 1.5; color: #ccc; word-wrap: break-word; }
-  .transcript-box .placeholder { color: #444; font-style: italic; }
-  .transcript-box .interim { color: #888; }
+  .current-box { background: #16213e; border-radius: 8px; padding: 1rem; min-height: 60px; margin-bottom: 1rem; text-align: left; font-size: 0.95rem; line-height: 1.5; color: #ccc; word-wrap: break-word; }
+  .current-box .placeholder { color: #444; font-style: italic; }
+  .current-box .interim { color: #888; }
 
-  .stats { display: flex; justify-content: center; gap: 2rem; font-size: 0.75rem; color: #555; margin-bottom: 1.5rem; }
+  .stats { display: flex; justify-content: center; gap: 2rem; font-size: 0.75rem; color: #555; margin-bottom: 1rem; }
   .stats .stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
   .stats .val { font-size: 1rem; color: #888; font-variant-numeric: tabular-nums; }
+
+  .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .history-header h2 { font-size: 0.85rem; font-weight: 400; color: #666; }
+  .history-header button { background: #2a2a4a; border: none; color: #888; font-size: 0.7rem; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+  .history-header button:hover { background: #3a3a5a; color: #aaa; }
+
+  .history { max-height: 300px; overflow-y: auto; margin-bottom: 1.5rem; }
+  .history:empty::after { content: 'No sessions yet'; color: #444; font-style: italic; font-size: 0.8rem; }
+  .session { background: #16213e; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; text-align: left; cursor: pointer; position: relative; }
+  .session:hover { background: #1a2744; }
+  .session .meta { font-size: 0.7rem; color: #555; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .session .text { font-size: 0.85rem; color: #aaa; line-height: 1.4; }
+  .session .copied { position: absolute; top: 8px; right: 10px; font-size: 0.7rem; color: #2ecc71; opacity: 0; transition: opacity 0.2s; }
+  .session .copied.show { opacity: 1; }
 
   .help { font-size: 0.75rem; color: #444; line-height: 1.6; }
   .help kbd { background: #2a2a4a; padding: 2px 6px; border-radius: 3px; font-family: system-ui; font-size: 0.7rem; }
@@ -46,7 +60,7 @@
 
   <div class="timer" id="timer"></div>
 
-  <div class="transcript-box" id="transcriptBox">
+  <div class="current-box" id="transcriptBox">
     <span class="placeholder">Transcription will appear here...</span>
   </div>
 
@@ -56,9 +70,15 @@
     <div class="stat"><span class="val" id="totalTime">0:00</span>total time</div>
   </div>
 
+  <div class="history-header">
+    <h2>Session History</h2>
+    <button id="copyAllBtn" title="Copy all sessions to clipboard">Copy All</button>
+  </div>
+  <div class="history" id="history"></div>
+
   <div class="help">
     Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> to toggle dictation<br>
-    Keep this window open &mdash; minimizing is fine
+    Click a session to copy it &mdash; keep this window open
   </div>
 </div>
 <script>
@@ -69,6 +89,8 @@ const timerEl = document.getElementById('timer');
 const sessionCountEl = document.getElementById('sessionCount');
 const wordCountEl = document.getElementById('wordCount');
 const totalTimeEl = document.getElementById('totalTime');
+const historyEl = document.getElementById('history');
+const copyAllBtn = document.getElementById('copyAllBtn');
 
 let ws = null;
 let recognition = null;
@@ -81,6 +103,8 @@ let totalWords = 0;
 let totalSeconds = 0;
 let recordStart = null;
 let timerInterval = null;
+let currentSessionText = '';
+let sessions = [];
 
 function setStatus(state, text) {
   dot.className = 'dot ' + state;
@@ -93,6 +117,10 @@ function formatTime(secs) {
   return m + ':' + String(s).padStart(2, '0');
 }
 
+function formatTimestamp(date) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function startTimer() {
   recordStart = Date.now();
   timerInterval = setInterval(() => {
@@ -102,18 +130,60 @@ function startTimer() {
 }
 
 function stopTimer() {
+  let elapsed = 0;
   if (recordStart) {
-    totalSeconds += (Date.now() - recordStart) / 1000;
+    elapsed = (Date.now() - recordStart) / 1000;
+    totalSeconds += elapsed;
     totalTimeEl.textContent = formatTime(totalSeconds);
   }
   recordStart = null;
   clearInterval(timerInterval);
   timerEl.textContent = '';
+  return elapsed;
 }
 
 function countWords(text) {
   return text.trim().split(/\s+/).filter(w => w.length > 0).length;
 }
+
+function addSessionToHistory(text, durationSecs) {
+  if (!text.trim()) return;
+  const session = { text: text.trim(), time: new Date(), duration: durationSecs, words: countWords(text) };
+  sessions.push(session);
+
+  const el = document.createElement('div');
+  el.className = 'session';
+  el.innerHTML = `
+    <div class="meta">
+      <span>${formatTimestamp(session.time)} &mdash; ${formatTime(session.duration)}</span>
+      <span>${session.words} words</span>
+    </div>
+    <div class="text">${escapeHtml(session.text)}</div>
+    <div class="copied">Copied!</div>
+  `;
+  el.addEventListener('click', () => {
+    navigator.clipboard.writeText(session.text);
+    const badge = el.querySelector('.copied');
+    badge.classList.add('show');
+    setTimeout(() => badge.classList.remove('show'), 1000);
+  });
+  historyEl.prepend(el);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+copyAllBtn.addEventListener('click', () => {
+  const allText = sessions.map((s, i) =>
+    `[${formatTimestamp(s.time)}] ${s.text}`
+  ).join('\n\n');
+  navigator.clipboard.writeText(allText);
+  copyAllBtn.textContent = 'Copied!';
+  setTimeout(() => { copyAllBtn.textContent = 'Copy All'; }, 1000);
+});
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -128,21 +198,22 @@ function connectWS() {
     const msg = JSON.parse(event.data);
     if (msg.type === 'start') {
       shouldListen = true;
+      currentSessionText = '';
       sessionCount++;
       sessionCountEl.textContent = sessionCount;
       startRecognition();
       startTimer();
     } else if (msg.type === 'stop') {
       shouldListen = false;
-      stopRecognition();
-      stopTimer();
+      const duration = stopTimer();
+      stopRecognition(duration);
     }
   };
 
   ws.onclose = () => {
     setStatus('disconnected', 'Disconnected — reconnecting...');
     shouldListen = false;
-    stopRecognition();
+    stopRecognition(0);
     stopTimer();
     setTimeout(connectWS, 2000);
   };
@@ -173,8 +244,8 @@ function initRecognition() {
       }
     }
     const fullText = finalText + interimText;
+    currentSessionText = fullText;
 
-    // Update transcript display
     transcriptBox.innerHTML = '';
     if (finalText) {
       const span = document.createElement('span');
@@ -188,11 +259,8 @@ function initRecognition() {
       transcriptBox.appendChild(span);
     }
 
-    // Update word count
-    const wc = countWords(fullText);
-    wordCountEl.textContent = totalWords + wc;
+    wordCountEl.textContent = totalWords + countWords(fullText);
 
-    // Send to daemon
     const lastResult = event.results[event.results.length - 1];
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -239,13 +307,13 @@ function startRecognition() {
   }
 }
 
-function stopRecognition() {
+function stopRecognition(duration) {
   if (!isListening || !recognition) return;
-  // Count words from this session before clearing
-  const text = transcriptBox.textContent || '';
-  if (text && text !== 'Listening...' && text !== 'Transcription will appear here...') {
+  const text = currentSessionText;
+  if (text) {
     totalWords += countWords(text);
     wordCountEl.textContent = totalWords;
+    addSessionToHistory(text, duration || 0);
   }
   try { recognition.stop(); } catch (e) { /* ignore */ }
   isListening = false;
