@@ -87,7 +87,7 @@ class WebSpeechServer:
         return web.Response(text=html, content_type="text/html")
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(heartbeat=30.0)
         await ws.prepare(request)
         _logger.info("Chrome WebSocket connected")
 
@@ -100,12 +100,15 @@ class WebSpeechServer:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
                     self._handle_message(msg.data)
-                elif msg.type == web.WSMsgType.ERROR:
-                    _logger.warning("WebSocket error: %s", ws.exception())
+                elif msg.type in (web.WSMsgType.ERROR, web.WSMsgType.CLOSE, web.WSMsgType.CLOSING):
+                    _logger.warning("WebSocket msg type=%s, data=%s", msg.type, msg.data)
+                    break
+        except Exception:
+            _logger.exception("WebSocket handler error")
         finally:
             if self._ws is ws:
                 self._ws = None
-            _logger.info("Chrome WebSocket disconnected")
+            _logger.info("Chrome WebSocket disconnected (close_code=%s)", ws.close_code)
 
         return ws
 
