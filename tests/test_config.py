@@ -12,10 +12,6 @@ class ConfigTests(unittest.TestCase):
         config = Config(excluded_apps=["Claude", "Zoom"])
         self.assertEqual(config.excluded_apps, ["Claude", "Zoom"])
 
-    def test_improve_hotkey_default(self):
-        config = Config()
-        self.assertEqual(config.improve_hotkey, "cmd+alt+d")
-
     def test_config_validation_clamps_invalid_values(self):
         config = Config(
             mode="bad",

@@ -1,4 +1,4 @@
-"""Cohere Transcribe STT engine using transformers."""
+"""Qwen3-ASR STT engine using qwen-asr."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from typing import Optional
 
 import numpy as np
 
-_cohere_available = False
+_qwen_available = False
 
 try:
-    from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+    from qwen_asr import Qwen3ASRModel
 
-    _cohere_available = True
+    _qwen_available = True
 except ImportError:
     pass
 
@@ -24,7 +24,7 @@ def _detect_device() -> str:
         import torch
 
         if torch.cuda.is_available():
-            return "cuda"
+            return "cuda:0"
         if torch.backends.mps.is_available():
             return "mps"
     except Exception:
@@ -32,10 +32,10 @@ def _detect_device() -> str:
     return "cpu"
 
 
-class CohereTranscribeEngine:
-    """Speech-to-text engine backed by CohereLabs/cohere-transcribe."""
+class QwenASREngine:
+    """Speech-to-text engine backed by Qwen3-ASR."""
 
-    DEFAULT_MODEL = "CohereLabs/cohere-transcribe-03-2026"
+    DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
     def __init__(
         self,
@@ -45,11 +45,10 @@ class CohereTranscribeEngine:
         self.model_name = model_name
         self.device = device or os.environ.get("CLAUDE_STT_DEVICE") or _detect_device()
         self._model = None
-        self._processor = None
         self._logger = logging.getLogger(__name__)
 
     def is_available(self) -> bool:
-        return _cohere_available
+        return _qwen_available
 
     def load_model(self) -> bool:
         if not self.is_available():
@@ -57,18 +56,18 @@ class CohereTranscribeEngine:
         if self._model is not None:
             return True
         try:
-            self._processor = AutoProcessor.from_pretrained(
-                self.model_name, trust_remote_code=True
+            import torch
+
+            dtype = torch.bfloat16 if self.device != "cpu" else torch.float32
+            self._model = Qwen3ASRModel.from_pretrained(
+                self.model_name,
+                dtype=dtype,
+                device_map=self.device,
             )
-            self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                self.model_name, trust_remote_code=True
-            )
-            self._model.to(self.device)
-            self._model.eval()
             self._logger.info("Loaded model on device: %s", self.device)
             return True
         except Exception:
-            self._logger.exception("Failed to load Cohere Transcribe model")
+            self._logger.exception("Failed to load Qwen ASR model")
             return False
 
     def transcribe(
@@ -80,15 +79,15 @@ class CohereTranscribeEngine:
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
 
-            lang = language if language != "auto" else "en"
+            kwargs = {"language": "English"}
 
-            texts = self._model.transcribe(
-                processor=self._processor,
-                audio_arrays=[audio],
-                sample_rates=[sample_rate],
-                language=lang,
+            results = self._model.transcribe(
+                audio=(audio, sample_rate),
+                **kwargs,
             )
-            return texts[0].strip() if texts else ""
+            if results and hasattr(results[0], "text"):
+                return results[0].text.strip()
+            return str(results[0]).strip() if results else ""
         except Exception:
-            self._logger.exception("Cohere Transcribe transcription failed")
+            self._logger.exception("Qwen ASR transcription failed")
             return ""

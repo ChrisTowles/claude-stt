@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
-from .engines.cohere_transcribe import CohereTranscribeEngine
+from .engines.qwen_asr import QwenASREngine
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
 from .keyboard import test_injection
@@ -403,11 +403,10 @@ def daemon_status():
     config = Config.load().validate()
     logger.info("Config path: %s", Config.get_config_path())
     logger.info("Hotkey: %s", config.hotkey)
-    logger.info("Improve hotkey: %s", config.improve_hotkey)
     logger.info("Mode: %s", config.mode)
-    logger.info("Engine: cohere-transcribe (%s)", config.stt_model)
+    logger.info("Engine: qwen-asr (%s)", config.stt_model)
 
-    engine = CohereTranscribeEngine(model_name=config.stt_model)
+    engine = QwenASREngine(model_name=config.stt_model)
     if engine.is_available():
         logger.info("Engine availability: ready")
     else:

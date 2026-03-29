@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./install.sh
 
 # Or manually
-uv sync --python 3.12 --extra dev
+uv sync --python 3.12
 
 # Run tests
 uv run python -m unittest discover -s tests
@@ -21,6 +21,10 @@ uv run python -m unittest tests.test_config
 uv run ruff check src/
 ```
 
+## Conventions
+
+- Hard cutover only — no backwards compatibility. English-only support is fine.
+
 ## Architecture
 
 **Daemon-based design**: A background process (`STTDaemon`) runs continuously, listening for hotkey events and coordinating audio capture, transcription, and text output.
@@ -31,7 +35,7 @@ uv run ruff check src/
 - `daemon_service.py` - Runtime orchestration (`STTDaemon` class coordinates all components)
 - `hotkey.py` - Global hotkey listener using pynput (supports toggle and push-to-talk modes)
 - `recorder.py` - Audio capture via sounddevice
-- `engines/cohere_transcribe.py` - Cohere Transcribe STT engine (CohereLabs/cohere-transcribe-03-2026 via transformers). Auto-detects device: CUDA → MPS → CPU. Override with `CLAUDE_STT_DEVICE` env var.
+- `engines/qwen_asr.py` - Qwen3-ASR STT engine (Qwen/Qwen3-ASR-1.7B via qwen-asr). Auto-detects device: CUDA → MPS → CPU. Override with `CLAUDE_STT_DEVICE` env var.
 - `keyboard.py` - Text output via ydotool (Wayland), pynput (X11), or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
 - `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`

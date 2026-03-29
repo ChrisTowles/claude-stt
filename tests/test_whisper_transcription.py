@@ -1,4 +1,4 @@
-"""End-to-end Cohere Transcribe transcription tests using real audio samples.
+"""End-to-end Qwen3-ASR transcription tests using real audio samples.
 
 Downloads a LibriSpeech sample from HuggingFace and verifies the
 engine produces correct transcriptions.
@@ -12,7 +12,7 @@ from typing import ClassVar, Optional
 
 import numpy as np
 
-from claude_stt.engines.cohere_transcribe import CohereTranscribeEngine, _cohere_available
+from claude_stt.engines.qwen_asr import QwenASREngine, _qwen_available
 
 
 def _download_sample_audio() -> tuple[np.ndarray, int]:
@@ -52,19 +52,19 @@ def _download_sample_audio() -> tuple[np.ndarray, int]:
     return audio, sr
 
 
-@unittest.skipUnless(_cohere_available, "transformers not installed")
-class CohereTranscribeTests(unittest.TestCase):
-    """Test Cohere Transcribe engine produces correct transcriptions from real audio."""
+@unittest.skipUnless(_qwen_available, "qwen-asr not installed")
+class QwenASRTests(unittest.TestCase):
+    """Test Qwen3-ASR engine produces correct transcriptions from real audio."""
 
-    _engine: ClassVar[Optional[CohereTranscribeEngine]] = None
+    _engine: ClassVar[Optional[QwenASREngine]] = None
     _audio: ClassVar[Optional[np.ndarray]] = None
     _sample_rate: ClassVar[int] = 16000
 
     @classmethod
     def setUpClass(cls) -> None:
         """Load model and download sample audio."""
-        cls._engine = CohereTranscribeEngine()
-        assert cls._engine.load_model(), "Failed to load Cohere Transcribe model"
+        cls._engine = QwenASREngine()
+        assert cls._engine.load_model(), "Failed to load Qwen ASR model"
         cls._audio, cls._sample_rate = _download_sample_audio()
 
     def test_transcription_returns_nonempty_string(self) -> None:

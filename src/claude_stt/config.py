@@ -30,12 +30,10 @@ class Config:
 
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"
-    improve_hotkey: str = "cmd+alt+d"
-    improve_model: str = "haiku"
     mode: Literal["push-to-talk", "toggle"] = "toggle"
 
     # Engine settings
-    stt_model: str = "CohereLabs/cohere-transcribe-03-2026"
+    stt_model: str = "Qwen/Qwen3-ASR-1.7B"
 
     # Audio settings
     sample_rate: int = 16000
@@ -102,8 +100,6 @@ class Config:
                 audio_device=stt_config.get("audio_device", cls.audio_device),
                 output_mode=stt_config.get("output_mode", cls.output_mode),
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
-                improve_hotkey=stt_config.get("improve_hotkey", cls.improve_hotkey),
-                improve_model=stt_config.get("improve_model", cls.improve_model),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
                 language=stt_config.get("language", cls.language),
                 excluded_apps=stt_config.get("excluded_apps", []),
@@ -132,8 +128,6 @@ class Config:
                 "audio_device": self.audio_device,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
-                "improve_hotkey": self.improve_hotkey,
-                "improve_model": self.improve_model,
                 "soft_newlines": self.soft_newlines,
                 "language": self.language,
                 "excluded_apps": self.excluded_apps,
@@ -172,8 +166,8 @@ class Config:
             self.mode = "toggle"
 
         if not isinstance(self.stt_model, str) or not self.stt_model.strip():
-            logger.warning("Invalid stt_model; defaulting to Cohere Transcribe")
-            self.stt_model = "CohereLabs/cohere-transcribe-03-2026"
+            logger.warning("Invalid stt_model; defaulting to Qwen3-ASR")
+            self.stt_model = "Qwen/Qwen3-ASR-1.7B"
 
         if self.output_mode not in ("injection", "clipboard", "auto"):
             logger.warning("Invalid output_mode '%s'; defaulting to 'auto'", self.output_mode)
