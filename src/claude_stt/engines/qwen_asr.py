@@ -1,4 +1,4 @@
-"""Qwen3-ASR STT engine using qwen-asr."""
+"""Qwen3-ASR STT engine using qwen-asr with vLLM streaming."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _detect_device() -> str:
 
 
 class QwenASREngine:
-    """Speech-to-text engine backed by Qwen3-ASR."""
+    """Speech-to-text engine backed by Qwen3-ASR with vLLM streaming."""
 
     DEFAULT_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
@@ -56,34 +56,80 @@ class QwenASREngine:
         if self._model is not None:
             return True
         try:
-            import torch
-
-            dtype = torch.bfloat16 if self.device != "cpu" else torch.float32
-            self._model = Qwen3ASRModel.from_pretrained(
+            self._model = Qwen3ASRModel.LLM(
                 self.model_name,
-                dtype=dtype,
-                device_map=self.device,
+                gpu_memory_utilization=0.7,
+                max_model_len=4096,
             )
-            self._logger.info("Loaded model on device: %s", self.device)
+            self._logger.info("Loaded vLLM model on device: %s", self.device)
             return True
         except Exception:
             self._logger.exception("Failed to load Qwen ASR model")
             return False
 
+    def init_streaming(self, chunk_size_sec: float = 2.0):
+        """Initialize a streaming transcription session.
+
+        Returns:
+            ASRStreamingState object, or None on failure.
+        """
+        if not self.load_model():
+            return None
+        try:
+            return self._model.init_streaming_state(
+                chunk_size_sec=chunk_size_sec,
+                unfixed_chunk_num=2,
+                unfixed_token_num=5,
+            )
+        except Exception:
+            self._logger.exception("Failed to init streaming state")
+            return None
+
+    def stream_chunk(self, audio: np.ndarray, state) -> str:
+        """Feed an audio chunk to the streaming session.
+
+        Returns:
+            Current partial transcription text.
+        """
+        if not self._model or state is None:
+            return ""
+        try:
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+            state = self._model.streaming_transcribe(audio, state)
+            return (state.text or "").strip()
+        except Exception:
+            self._logger.exception("Streaming transcription failed")
+            return ""
+
+    def finish_stream(self, state) -> str:
+        """Finalize a streaming session and get final transcription.
+
+        Returns:
+            Final transcription text.
+        """
+        if not self._model or state is None:
+            return ""
+        try:
+            state = self._model.finish_streaming_transcribe(state)
+            return (state.text or "").strip()
+        except Exception:
+            self._logger.exception("Failed to finish streaming transcription")
+            return ""
+
     def transcribe(
         self, audio: np.ndarray, sample_rate: int = 16000, language: str = "auto"
     ) -> str:
+        """Batch transcribe (non-streaming fallback)."""
         if not self.load_model():
             return ""
         try:
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
 
-            kwargs = {"language": "English"}
-
             results = self._model.transcribe(
                 audio=(audio, sample_rate),
-                **kwargs,
+                language="English",
             )
             if results and hasattr(results[0], "text"):
                 return results[0].text.strip()

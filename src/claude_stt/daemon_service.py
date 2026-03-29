@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import queue
 import signal
 import threading
 import time
@@ -15,7 +14,7 @@ from .config import Config
 from .engines.qwen_asr import QwenASREngine
 from .errors import EngineError, HotkeyError, RecorderError
 from .hotkey import HotkeyListener
-from .keyboard import output_text
+from .keyboard import delete_chars, type_text_streaming, output_text
 from .recorder import AudioRecorder, RecorderConfig
 from .sounds import SoundEvent, play_sound
 from .window import get_active_window, WindowInfo
@@ -25,11 +24,6 @@ class STTDaemon:
     """Main daemon that coordinates all STT components."""
 
     def __init__(self, config: Optional[Config] = None):
-        """Initialize the daemon.
-
-        Args:
-            config: Configuration, or load from file if None.
-        """
         self.config = (config or Config.load()).validate()
         self._running = False
         self._recording = False
@@ -39,24 +33,19 @@ class STTDaemon:
         self._engine: Optional[QwenASREngine] = None
         self._hotkey: Optional[HotkeyListener] = None
 
-        # Recording state
+        # Recording/streaming state
         self._record_start_time: float = 0
         self._original_window: Optional[WindowInfo] = None
+        self._streaming_thread: Optional[threading.Thread] = None
+        self._stop_streaming = threading.Event()
+        self._chars_typed: int = 0
+
         # Threading
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._transcribe_queue: "queue.Queue[Optional[tuple[object, Optional[WindowInfo]]]]" = (
-            queue.Queue(maxsize=2)
-        )
-        self._transcribe_thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger(__name__)
 
     def _init_components(self) -> bool:
-        """Initialize all components.
-
-        Returns:
-            True if all components initialized successfully.
-        """
         try:
             self._recorder = AudioRecorder(
                 RecorderConfig(
@@ -73,7 +62,9 @@ class STTDaemon:
                 import sounddevice as sd
                 if self.config.audio_device is not None:
                     device_info = sd.query_devices(self.config.audio_device)
-                    self._logger.info("Audio input: [%s] %s", self.config.audio_device, device_info['name'])
+                    self._logger.info(
+                        "Audio input: [%s] %s", self.config.audio_device, device_info['name']
+                    )
                 else:
                     device_info = sd.query_devices(kind='input')
                     self._logger.info("Audio input: %s (default)", device_info['name'])
@@ -97,77 +88,19 @@ class STTDaemon:
             self._logger.error("%s", exc)
             return False
 
-        self._start_transcription_worker()
         return True
 
-    def _start_transcription_worker(self) -> None:
-        if self._transcribe_thread is not None:
-            return
-
-        self._transcribe_thread = threading.Thread(
-            target=self._transcribe_worker,
-            name="claude-stt-transcribe",
-            daemon=True,
-        )
-        self._transcribe_thread.start()
-
-    def _transcribe_worker(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                item = self._transcribe_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-
-            if item is None:
-                break
-
-            audio, window_info = item
-            if not self._engine:
-                continue
-
-            # Log audio level
-            rms = np.sqrt(np.mean(audio**2))
-            db = 20 * np.log10(max(rms, 1e-10))
-            self._logger.info("Transcribing audio (%d samples, %.1f dB)...", len(audio), db)
-            try:
-                text = self._engine.transcribe(audio, self.config.sample_rate, self.config.language)
-            except Exception:
-                self._logger.exception("Transcription failed")
-                continue
-
-            text = text.strip()
-            if not text:
-                self._logger.info("No speech detected")
-                self._play_warning()
-                continue
-
-            # Filter out STT hallucinations (short phantom phrases on silence/quick stops)
-            cleaned = text.lower().replace("thank you", "").strip()
-            if len(cleaned) <= 5:
-                self._logger.info("Filtered likely hallucination: %r", text)
-                self._play_warning()
-                continue
-
-            display_text = text[:100] + "..." if len(text) > 100 else text
-            self._logger.info("Transcribed: %s", display_text)
-            if not output_text(text, window_info, self.config):
-                self._logger.warning("Failed to output transcription")
-
     def _play_warning(self) -> None:
-        """Play a warning sound if sound effects are enabled."""
         if self.config.sound_effects:
             play_sound(SoundEvent.WARNING)
 
     def _on_recording_start(self):
-        """Called when recording should start."""
         with self._lock:
             if self._recording:
                 return
 
             self._recording = True
             self._record_start_time = time.time()
-
-            # Capture the active window
             self._original_window = get_active_window()
 
             # Check if the focused app is excluded
@@ -179,7 +112,6 @@ class STTDaemon:
                             "Skipping recording: %s is excluded", self._original_window.app_name
                         )
                         self._recording = False
-                        # Reset hotkey listener toggle state so next press works
                         if self._hotkey:
                             self._hotkey.reset_recording()
                         return
@@ -194,11 +126,69 @@ class STTDaemon:
                 self._recording = False
                 if self.config.sound_effects:
                     play_sound(SoundEvent.ERROR)
+                return
+
+        # Start streaming transcription thread
+        self._stop_streaming.clear()
+        self._chars_typed = 0
+        self._streaming_thread = threading.Thread(
+            target=self._streaming_worker,
+            name="claude-stt-streaming",
+            daemon=True,
+        )
+        self._streaming_thread.start()
+
+    def _streaming_worker(self):
+        """Stream audio chunks to engine and type partial results in real-time."""
+        state = self._engine.init_streaming()
+        if state is None:
+            self._logger.error("Failed to init streaming state")
+            return
+
+        prev_text = ""
+
+        while not self._stop_streaming.is_set():
+            chunk = self._recorder.get_chunk(timeout=0.1)
+            if chunk is None:
+                continue
+
+            chunk = np.squeeze(chunk)
+            if chunk.dtype != np.float32:
+                chunk = chunk.astype(np.float32)
+
+            new_text = self._engine.stream_chunk(chunk, state)
+
+            if new_text and new_text != prev_text:
+                # Delete previous partial text and type new
+                if self._chars_typed > 0:
+                    delete_chars(self._chars_typed)
+                type_text_streaming(new_text)
+                self._chars_typed = len(new_text)
+                prev_text = new_text
+
+        # Finalize: flush remaining audio
+        final_text = self._engine.finish_stream(state)
+        if final_text:
+            if self._chars_typed > 0:
+                delete_chars(self._chars_typed)
+            self._chars_typed = 0
+
+            final_text = final_text.strip()
+            if final_text:
+                display = final_text[:100] + "..." if len(final_text) > 100 else final_text
+                self._logger.info("Final transcription: %s", display)
+                output_text(final_text, self._original_window, self.config)
+            else:
+                self._logger.info("No speech detected")
+                self._play_warning()
+        else:
+            if self._chars_typed > 0:
+                delete_chars(self._chars_typed)
+                self._chars_typed = 0
+            self._logger.info("No speech detected")
+            self._play_warning()
 
     def _on_recording_stop(self):
-        """Called when recording should stop."""
-        audio = None
-        window_info = None
         with self._lock:
             if not self._recording:
                 return
@@ -208,31 +198,27 @@ class STTDaemon:
 
             # Stop recording
             if self._recorder:
-                audio = self._recorder.stop()
-            window_info = self._original_window
+                self._recorder.stop()
 
             self._logger.info("Recording stopped (%.1fs)", elapsed)
             if self.config.sound_effects:
                 play_sound(SoundEvent.STOP)
 
-        # Transcribe outside the lock
-        if audio is not None and len(audio) > 0:
-            try:
-                self._transcribe_queue.put_nowait((audio, window_info))
-            except queue.Full:
-                self._logger.warning("Dropping transcription; queue is full")
-        elif self.config.sound_effects:
-            play_sound(SoundEvent.WARNING)
+        # Signal streaming thread to finalize
+        self._stop_streaming.set()
+        if self._streaming_thread:
+            self._streaming_thread.join(timeout=10.0)
+            if self._streaming_thread.is_alive():
+                self._logger.warning("Streaming thread did not exit cleanly")
+            self._streaming_thread = None
 
     def _check_max_recording_time(self) -> None:
-        """Check if max recording time has been reached."""
         if not self._recording:
             return
 
         elapsed = time.time() - self._record_start_time
         max_seconds = self.config.max_recording_seconds
 
-        # Warning at 30 seconds before max
         if max_seconds > 30 and max_seconds - 30 <= elapsed < max_seconds - 29:
             if self.config.sound_effects:
                 play_sound(SoundEvent.WARNING)
@@ -241,7 +227,6 @@ class STTDaemon:
             self._on_recording_stop()
 
     def run(self):
-        """Run the daemon main loop."""
         self._logger.info("claude-stt daemon starting...")
         self._logger.info("Hotkey: %s", self.config.hotkey)
         self._logger.info("Engine: qwen-asr (%s)", self.config.stt_model)
@@ -250,7 +235,6 @@ class STTDaemon:
         if not self._init_components():
             raise SystemExit(1)
 
-        # Load the model
         self._logger.info("Loading STT model...")
         if not self._engine.load_model():
             self._logger.error("Failed to load STT model")
@@ -263,14 +247,12 @@ class STTDaemon:
         if self.config.sound_effects:
             play_sound(SoundEvent.READY)
 
-        # Start hotkey listeners
         if not self._hotkey.start():
             self._logger.error("Failed to start hotkey listener")
             raise SystemExit(1)
 
         self._running = True
 
-        # Handle shutdown signals
         def shutdown(signum, frame):
             self._logger.info("Shutting down...")
             self._running = False
@@ -296,7 +278,6 @@ class STTDaemon:
         except Exception:
             self._logger.debug("Signal handlers unavailable", exc_info=True)
 
-        # Main loop
         try:
             while self._running:
                 self._check_max_recording_time()
@@ -305,19 +286,12 @@ class STTDaemon:
             self.stop()
 
     def stop(self):
-        """Stop the daemon."""
         self._running = False
         self._stop_event.set()
+        self._stop_streaming.set()
 
-        try:
-            self._transcribe_queue.put_nowait(None)
-        except queue.Full:
-            pass
-
-        if self._transcribe_thread:
-            self._transcribe_thread.join(timeout=1.0)
-            if self._transcribe_thread.is_alive():
-                self._logger.warning("Transcribe thread did not exit cleanly")
+        if self._streaming_thread:
+            self._streaming_thread.join(timeout=5.0)
 
         if self._recording and self._recorder:
             self._recorder.stop()

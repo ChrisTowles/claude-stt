@@ -339,6 +339,36 @@ def _output_via_clipboard(text: str, config: Config) -> bool:
         return False
 
 
+def delete_chars(n: int) -> bool:
+    """Delete n characters by sending backspace keys.
+
+    Args:
+        n: Number of characters to delete.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if n <= 0:
+        return True
+    try:
+        if is_wayland() and _has_ydotool():
+            for _ in range(n):
+                if not _ydotool_key("BackSpace"):
+                    return False
+            return True
+
+        kb = get_keyboard()
+        if kb is None:
+            return False
+        for _ in range(n):
+            kb.press(Key.backspace)
+            kb.release(Key.backspace)
+        return True
+    except Exception:
+        _logger.warning("delete_chars failed", exc_info=True)
+        return False
+
+
 def type_text_streaming(text: str) -> bool:
     """Type text character by character for streaming output.
 
