@@ -13,7 +13,7 @@ from typing import Optional
 from .config import Config
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
-from .keyboard import delete_chars, type_text_streaming
+from .keyboard import type_text_streaming
 from .sounds import SoundEvent, play_sound
 from .web.server import WebSpeechServer
 from .window import get_active_window, WindowInfo
@@ -45,8 +45,8 @@ class STTDaemon:
         try:
             self._server = WebSpeechServer(
                 port=self.config.ws_port,
-                on_interim=self._on_interim_text,
-                on_final=self._on_final_text,
+                on_interim=self._on_text,
+                on_final=self._on_text,
                 on_end=self._on_recognition_end,
                 on_error=self._on_recognition_error,
                 on_ready=self._on_chrome_ready,
@@ -86,7 +86,8 @@ class STTDaemon:
     def _on_chrome_ready(self):
         self._logger.info("Chrome Web Speech API connected and ready")
 
-    def _on_interim_text(self, text: str):
+    def _on_text(self, text: str):
+        """Handle interim or final text from Chrome. Append-only typing."""
         if not self._recording:
             return
         text = text.strip()
@@ -95,36 +96,13 @@ class STTDaemon:
 
         with self._lock:
             if text.startswith(self._typed_text):
+                # Append new words
                 addition = text[len(self._typed_text):]
-                self._logger.info("Streaming: +%r", addition)
                 type_text_streaming(addition)
             else:
-                self._logger.info("Streaming: correction, retyping (%d chars)", len(text))
-                if self._chars_typed > 0:
-                    delete_chars(self._chars_typed)
-                type_text_streaming(text)
-            self._chars_typed = len(text)
-            self._typed_text = text
-
-    def _on_final_text(self, text: str):
-        if not self._recording:
-            return
-        text = text.strip()
-        if not text:
-            return
-
-        with self._lock:
-            if text == self._typed_text:
-                self._logger.info("Final matches streamed text")
-            elif text.startswith(self._typed_text):
-                addition = text[len(self._typed_text):]
-                self._logger.info("Final: appending %r", addition)
-                type_text_streaming(addition)
-            else:
-                self._logger.info("Final: correction, retyping (%d chars)", len(text))
-                if self._chars_typed > 0:
-                    delete_chars(self._chars_typed)
-                type_text_streaming(text)
+                # Interim correction (only affects trailing words) — skip, next update will extend
+                self._logger.debug("Skipping interim correction: %r", text[-30:])
+                return
             self._chars_typed = len(text)
             self._typed_text = text
 
