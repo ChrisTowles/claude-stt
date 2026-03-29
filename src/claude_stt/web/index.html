@@ -44,7 +44,7 @@ function setStatus(state, text) {
 
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws = new WebSocket(proto + '//' + location.host + location.pathname + '/ws');
 
   ws.onopen = () => {
     setStatus('idle', 'Connected — waiting for hotkey');
