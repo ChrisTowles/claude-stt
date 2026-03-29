@@ -105,6 +105,7 @@ let totalSeconds = 0;
 let recordStart = null;
 let timerInterval = null;
 let currentSessionText = '';
+let committedText = '';  // text from previous recognition segments (before auto-restart)
 let sessions = [];
 
 function setStatus(state, text) {
@@ -200,6 +201,7 @@ function connectWS() {
     if (msg.type === 'start') {
       shouldListen = true;
       currentSessionText = '';
+      committedText = '';
       sessionCount++;
       sessionCountEl.textContent = sessionCount;
       startRecognition();
@@ -234,29 +236,31 @@ function initRecognition() {
   rec.lang = 'en-US';
 
   rec.onresult = (event) => {
-    let finalText = '';
-    let interimText = '';
+    let segmentFinal = '';
+    let segmentInterim = '';
     for (let i = 0; i < event.results.length; i++) {
       const t = event.results[i][0].transcript;
       if (event.results[i].isFinal) {
-        finalText += t;
+        segmentFinal += t;
       } else {
-        interimText += t;
+        segmentInterim += t;
       }
     }
-    const fullText = finalText + interimText;
+    // Prepend text from previous recognition segments (before auto-restart)
+    const allFinal = committedText + segmentFinal;
+    const fullText = allFinal + segmentInterim;
     currentSessionText = fullText;
 
     transcriptBox.innerHTML = '';
-    if (finalText) {
+    if (allFinal) {
       const span = document.createElement('span');
-      span.textContent = finalText;
+      span.textContent = allFinal;
       transcriptBox.appendChild(span);
     }
-    if (interimText) {
+    if (segmentInterim) {
       const span = document.createElement('span');
       span.className = 'interim';
-      span.textContent = interimText;
+      span.textContent = segmentInterim;
       transcriptBox.appendChild(span);
     }
 
@@ -273,6 +277,8 @@ function initRecognition() {
 
   rec.onend = () => {
     isListening = false;
+    // Commit all finalized text so it persists across auto-restarts
+    committedText = currentSessionText;
     if (shouldListen) {
       setTimeout(() => { if (shouldListen) startRecognition(); }, 100);
     } else {
