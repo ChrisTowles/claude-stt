@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude STT</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  .container { text-align: center; padding: 2rem; }
+  .status { font-size: 1.2rem; margin-bottom: 1rem; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .dot.disconnected { background: #e74c3c; }
+  .dot.idle { background: #f39c12; }
+  .dot.listening { background: #2ecc71; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .transcript { font-size: 0.9rem; color: #888; margin-top: 1rem; max-width: 400px; word-wrap: break-word; min-height: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; font-weight: 300; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Claude STT</h1>
+  <div class="status">
+    <span class="dot disconnected" id="dot"></span>
+    <span id="statusText">Connecting...</span>
+  </div>
+  <div class="transcript" id="transcript"></div>
+</div>
+<script>
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const transcriptEl = document.getElementById('transcript');
+
+let ws = null;
+let recognition = null;
+let isListening = false;
+let shouldListen = false;
+
+function setStatus(state, text) {
+  dot.className = 'dot ' + state;
+  statusText.textContent = text;
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+  ws.onopen = () => {
+    setStatus('idle', 'Connected — waiting for hotkey');
+    ws.send(JSON.stringify({ type: 'ready' }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'start') {
+      shouldListen = true;
+      startRecognition();
+    } else if (msg.type === 'stop') {
+      shouldListen = false;
+      stopRecognition();
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus('disconnected', 'Disconnected — reconnecting...');
+    shouldListen = false;
+    stopRecognition();
+    setTimeout(connectWS, 2000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function initRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setStatus('disconnected', 'Speech API not available');
+    return null;
+  }
+  const rec = new SpeechRecognition();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+
+  rec.onresult = (event) => {
+    let fullText = '';
+    let lastIsFinal = false;
+    for (let i = 0; i < event.results.length; i++) {
+      fullText += event.results[i][0].transcript;
+      if (i === event.results.length - 1) {
+        lastIsFinal = event.results[i].isFinal;
+      }
+    }
+    transcriptEl.textContent = fullText;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: lastIsFinal ? 'final' : 'interim',
+        text: fullText
+      }));
+    }
+  };
+
+  rec.onend = () => {
+    isListening = false;
+    if (shouldListen) {
+      // Chrome auto-stopped (silence timeout) — restart
+      setTimeout(() => {
+        if (shouldListen) startRecognition();
+      }, 100);
+    } else {
+      setStatus('idle', 'Connected — waiting for hotkey');
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'end' }));
+    }
+  };
+
+  rec.onerror = (event) => {
+    if (event.error === 'no-speech') return; // normal, ignore
+    if (event.error === 'aborted') return; // we stopped it
+    console.error('Speech error:', event.error);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'error', error: event.error }));
+    }
+  };
+
+  return rec;
+}
+
+function startRecognition() {
+  if (isListening) return;
+  if (!recognition) recognition = initRecognition();
+  if (!recognition) return;
+  try {
+    recognition.start();
+    isListening = true;
+    setStatus('listening', 'Listening...');
+    transcriptEl.textContent = '';
+  } catch (e) {
+    console.error('Failed to start recognition:', e);
+  }
+}
+
+function stopRecognition() {
+  if (!isListening || !recognition) return;
+  try {
+    recognition.stop();
+  } catch (e) {
+    // ignore
+  }
+  isListening = false;
+  setStatus('idle', 'Connected — waiting for hotkey');
+}
+
+connectWS();
+</script>
+</body>
+</html>

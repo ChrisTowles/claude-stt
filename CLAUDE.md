@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./install.sh
 
 # Or manually
-uv sync --python 3.12 --extra dev
+uv sync --python 3.12
 
 # Run tests
 uv run python -m unittest discover -s tests
@@ -21,17 +21,21 @@ uv run python -m unittest tests.test_config
 uv run ruff check src/
 ```
 
+## Conventions
+
+- Hard cutover only — no backwards compatibility. English-only support is fine.
+
 ## Architecture
 
-**Daemon-based design**: A background process (`STTDaemon`) runs continuously, listening for hotkey events and coordinating audio capture, transcription, and text output.
+**Daemon + Chrome Web Speech API**: A background daemon manages hotkey events and text output. Chrome's Web Speech API handles speech recognition via a localhost page served by the daemon.
 
 ### Core Components
 
 - `daemon.py` - Process management (start/stop/status, PID file handling, background spawning)
 - `daemon_service.py` - Runtime orchestration (`STTDaemon` class coordinates all components)
 - `hotkey.py` - Global hotkey listener using pynput (supports toggle and push-to-talk modes)
-- `recorder.py` - Audio capture via sounddevice
-- `engines/whisper.py` - Whisper STT engine (faster-whisper)
+- `web/server.py` - HTTP + WebSocket server (aiohttp). Serves the HTML page and bridges Chrome ↔ daemon
+- `web/index.html` - Chrome page with `webkitSpeechRecognition` (streaming, interim results)
 - `keyboard.py` - Text output via ydotool (Wayland), pynput (X11), or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
 - `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`
@@ -39,11 +43,12 @@ uv run ruff check src/
 ### Flow
 
 ```
-Hotkey press → AudioRecorder.start() → [user speaks] → Hotkey release
-    → AudioRecorder.stop() → Engine.transcribe() → output_text()
+Hotkey press → daemon sends "start" via WebSocket → Chrome starts speech recognition
+    → interim results streamed back → text typed in real-time via ydotool
+Hotkey release → daemon sends "stop" → Chrome stops recognition → final correction if needed
 ```
 
-Transcription runs in a dedicated worker thread to avoid blocking the hotkey listener.
+Communication runs over WebSocket (`ws://localhost:PORT/ws`). Chrome auto-restarts recognition on silence timeout.
 
 ## Task Tracking
 

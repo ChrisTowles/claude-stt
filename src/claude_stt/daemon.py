@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
-from .engines.whisper import WhisperEngine
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
 from .keyboard import test_injection
@@ -403,15 +402,8 @@ def daemon_status():
     config = Config.load().validate()
     logger.info("Config path: %s", Config.get_config_path())
     logger.info("Hotkey: %s", config.hotkey)
-    logger.info("Improve hotkey: %s", config.improve_hotkey)
     logger.info("Mode: %s", config.mode)
-    logger.info("Engine: whisper (%s)", config.whisper_model)
-
-    engine = WhisperEngine(model_name=config.whisper_model)
-    if engine.is_available():
-        logger.info("Engine availability: ready")
-    else:
-        logger.warning("Engine availability: missing dependencies")
+    logger.info("Web server port: %d", config.ws_port)
 
     if config.output_mode == "auto":
         injection_ready = test_injection()
