@@ -13,7 +13,7 @@ from typing import Optional
 from .config import Config
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
-from .keyboard import type_text_streaming
+from .keyboard import delete_chars, type_text_streaming
 from .sounds import SoundEvent, play_sound
 from .web.server import WebSpeechServer
 from .window import get_active_window, WindowInfo
@@ -87,7 +87,7 @@ class STTDaemon:
         self._logger.info("Chrome Web Speech API connected and ready")
 
     def _on_text(self, text: str):
-        """Handle interim or final text from Chrome. Append-only typing."""
+        """Handle interim or final text from Chrome."""
         if not self._recording:
             return
         text = text.strip()
@@ -96,13 +96,23 @@ class STTDaemon:
 
         with self._lock:
             if text.startswith(self._typed_text):
-                # Append new words
+                # Common case: new text extends what we typed — just append
                 addition = text[len(self._typed_text):]
                 type_text_streaming(addition)
             else:
-                # Interim correction (only affects trailing words) — skip, next update will extend
-                self._logger.debug("Skipping interim correction: %r", text[-30:])
-                return
+                # Correction: find common prefix, delete the tail, type new tail
+                common = 0
+                for i in range(min(len(self._typed_text), len(text))):
+                    if self._typed_text[i] == text[i]:
+                        common = i + 1
+                    else:
+                        break
+                chars_to_delete = self._chars_typed - common
+                new_tail = text[common:]
+                if chars_to_delete > 0:
+                    delete_chars(chars_to_delete)
+                if new_tail:
+                    type_text_streaming(new_tail)
             self._chars_typed = len(text)
             self._typed_text = text
 
