@@ -6,40 +6,113 @@
 <title>Claude STT</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; align-items: center; justify-content: center; height: 100vh; }
-  .container { text-align: center; padding: 2rem; }
-  .status { font-size: 1.2rem; margin-bottom: 1rem; }
-  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 2rem; }
+  .container { text-align: center; max-width: 500px; width: 100%; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; font-weight: 300; }
+  .subtitle { font-size: 0.8rem; color: #666; margin-bottom: 1.5rem; }
+  .subtitle a { color: #666; text-decoration: none; }
+  .subtitle a:hover { color: #888; text-decoration: underline; }
+
+  .status-bar { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.1rem; margin-bottom: 1rem; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .dot.disconnected { background: #e74c3c; }
   .dot.idle { background: #f39c12; }
   .dot.listening { background: #2ecc71; animation: pulse 1s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-  .transcript { font-size: 0.9rem; color: #888; margin-top: 1rem; max-width: 400px; word-wrap: break-word; min-height: 2rem; }
-  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; font-weight: 300; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .timer { font-size: 0.85rem; color: #666; margin-bottom: 1rem; min-height: 1.2rem; font-variant-numeric: tabular-nums; }
+
+  .transcript-box { background: #16213e; border-radius: 8px; padding: 1rem; min-height: 80px; margin-bottom: 1.5rem; text-align: left; font-size: 0.95rem; line-height: 1.5; color: #ccc; word-wrap: break-word; }
+  .transcript-box .placeholder { color: #444; font-style: italic; }
+  .transcript-box .interim { color: #888; }
+
+  .stats { display: flex; justify-content: center; gap: 2rem; font-size: 0.75rem; color: #555; margin-bottom: 1.5rem; }
+  .stats .stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .stats .val { font-size: 1rem; color: #888; font-variant-numeric: tabular-nums; }
+
+  .help { font-size: 0.75rem; color: #444; line-height: 1.6; }
+  .help kbd { background: #2a2a4a; padding: 2px 6px; border-radius: 3px; font-family: system-ui; font-size: 0.7rem; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Claude STT</h1>
-  <div class="status">
+  <div class="subtitle"><a href="https://github.com/ChrisTowles/claude-stt" target="_blank">github.com/ChrisTowles/claude-stt</a></div>
+
+  <div class="status-bar">
     <span class="dot disconnected" id="dot"></span>
     <span id="statusText">Connecting...</span>
   </div>
-  <div class="transcript" id="transcript"></div>
+
+  <div class="timer" id="timer"></div>
+
+  <div class="transcript-box" id="transcriptBox">
+    <span class="placeholder">Transcription will appear here...</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="val" id="sessionCount">0</span>sessions</div>
+    <div class="stat"><span class="val" id="wordCount">0</span>words</div>
+    <div class="stat"><span class="val" id="totalTime">0:00</span>total time</div>
+  </div>
+
+  <div class="help">
+    Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> to toggle dictation<br>
+    Keep this window open &mdash; minimizing is fine
+  </div>
 </div>
 <script>
 const dot = document.getElementById('dot');
 const statusText = document.getElementById('statusText');
-const transcriptEl = document.getElementById('transcript');
+const transcriptBox = document.getElementById('transcriptBox');
+const timerEl = document.getElementById('timer');
+const sessionCountEl = document.getElementById('sessionCount');
+const wordCountEl = document.getElementById('wordCount');
+const totalTimeEl = document.getElementById('totalTime');
 
 let ws = null;
 let recognition = null;
 let isListening = false;
 let shouldListen = false;
 
+// Stats
+let sessionCount = 0;
+let totalWords = 0;
+let totalSeconds = 0;
+let recordStart = null;
+let timerInterval = null;
+
 function setStatus(state, text) {
   dot.className = 'dot ' + state;
   statusText.textContent = text;
+}
+
+function formatTime(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function startTimer() {
+  recordStart = Date.now();
+  timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - recordStart) / 1000);
+    timerEl.textContent = formatTime(elapsed);
+  }, 200);
+}
+
+function stopTimer() {
+  if (recordStart) {
+    totalSeconds += (Date.now() - recordStart) / 1000;
+    totalTimeEl.textContent = formatTime(totalSeconds);
+  }
+  recordStart = null;
+  clearInterval(timerInterval);
+  timerEl.textContent = '';
+}
+
+function countWords(text) {
+  return text.trim().split(/\s+/).filter(w => w.length > 0).length;
 }
 
 function connectWS() {
@@ -55,10 +128,14 @@ function connectWS() {
     const msg = JSON.parse(event.data);
     if (msg.type === 'start') {
       shouldListen = true;
+      sessionCount++;
+      sessionCountEl.textContent = sessionCount;
       startRecognition();
+      startTimer();
     } else if (msg.type === 'stop') {
       shouldListen = false;
       stopRecognition();
+      stopTimer();
     }
   };
 
@@ -66,18 +143,17 @@ function connectWS() {
     setStatus('disconnected', 'Disconnected — reconnecting...');
     shouldListen = false;
     stopRecognition();
+    stopTimer();
     setTimeout(connectWS, 2000);
   };
 
-  ws.onerror = () => {
-    ws.close();
-  };
+  ws.onerror = () => { ws.close(); };
 }
 
 function initRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    setStatus('disconnected', 'Speech API not available');
+    setStatus('disconnected', 'Speech API not available — use Chrome');
     return null;
   }
   const rec = new SpeechRecognition();
@@ -86,18 +162,41 @@ function initRecognition() {
   rec.lang = 'en-US';
 
   rec.onresult = (event) => {
-    let fullText = '';
-    let lastIsFinal = false;
+    let finalText = '';
+    let interimText = '';
     for (let i = 0; i < event.results.length; i++) {
-      fullText += event.results[i][0].transcript;
-      if (i === event.results.length - 1) {
-        lastIsFinal = event.results[i].isFinal;
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += t;
+      } else {
+        interimText += t;
       }
     }
-    transcriptEl.textContent = fullText;
+    const fullText = finalText + interimText;
+
+    // Update transcript display
+    transcriptBox.innerHTML = '';
+    if (finalText) {
+      const span = document.createElement('span');
+      span.textContent = finalText;
+      transcriptBox.appendChild(span);
+    }
+    if (interimText) {
+      const span = document.createElement('span');
+      span.className = 'interim';
+      span.textContent = interimText;
+      transcriptBox.appendChild(span);
+    }
+
+    // Update word count
+    const wc = countWords(fullText);
+    wordCountEl.textContent = totalWords + wc;
+
+    // Send to daemon
+    const lastResult = event.results[event.results.length - 1];
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
-        type: lastIsFinal ? 'final' : 'interim',
+        type: lastResult.isFinal ? 'final' : 'interim',
         text: fullText
       }));
     }
@@ -106,10 +205,7 @@ function initRecognition() {
   rec.onend = () => {
     isListening = false;
     if (shouldListen) {
-      // Chrome auto-stopped (silence timeout) — restart
-      setTimeout(() => {
-        if (shouldListen) startRecognition();
-      }, 100);
+      setTimeout(() => { if (shouldListen) startRecognition(); }, 100);
     } else {
       setStatus('idle', 'Connected — waiting for hotkey');
     }
@@ -119,8 +215,7 @@ function initRecognition() {
   };
 
   rec.onerror = (event) => {
-    if (event.error === 'no-speech') return; // normal, ignore
-    if (event.error === 'aborted') return; // we stopped it
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
     console.error('Speech error:', event.error);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'error', error: event.error }));
@@ -138,7 +233,7 @@ function startRecognition() {
     recognition.start();
     isListening = true;
     setStatus('listening', 'Listening...');
-    transcriptEl.textContent = '';
+    transcriptBox.innerHTML = '<span class="placeholder">Listening...</span>';
   } catch (e) {
     console.error('Failed to start recognition:', e);
   }
@@ -146,11 +241,13 @@ function startRecognition() {
 
 function stopRecognition() {
   if (!isListening || !recognition) return;
-  try {
-    recognition.stop();
-  } catch (e) {
-    // ignore
+  // Count words from this session before clearing
+  const text = transcriptBox.textContent || '';
+  if (text && text !== 'Listening...' && text !== 'Transcription will appear here...') {
+    totalWords += countWords(text);
+    wordCountEl.textContent = totalWords;
   }
+  try { recognition.stop(); } catch (e) { /* ignore */ }
   isListening = false;
   setStatus('idle', 'Connected — waiting for hotkey');
 }
