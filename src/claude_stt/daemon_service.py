@@ -72,7 +72,7 @@ class STTDaemon:
         if not chrome:
             self._logger.warning("Chrome not found — open http://127.0.0.1:%d manually", self.config.ws_port)
             return
-        url = f"http://127.0.0.1:{self.config.ws_port}"
+        url = self._server.url
         try:
             subprocess.Popen(
                 [chrome, f"--app={url}"],
@@ -139,7 +139,7 @@ class STTDaemon:
                         return
 
             if not self._server or not self._server.is_connected():
-                self._logger.error("Chrome not connected — open http://127.0.0.1:%d", self.config.ws_port)
+                self._logger.error("Chrome not connected — open %s", self._server.url)
                 self._recording = False
                 if self.config.sound_effects:
                     play_sound(SoundEvent.ERROR)
@@ -198,10 +198,7 @@ class STTDaemon:
 
         self._launch_chrome()
 
-        self._logger.info(
-            "Ready. Waiting for Chrome to connect at http://127.0.0.1:%d",
-            self.config.ws_port,
-        )
+        self._logger.info("Ready. Waiting for Chrome to connect at %s", self._server.url)
         if self.config.sound_effects:
             play_sound(SoundEvent.READY)
 

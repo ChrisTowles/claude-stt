@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -34,11 +35,17 @@ class WebSpeechServer:
         self.on_error = on_error
         self.on_ready = on_ready
 
+        # Random session token — only the Chrome window launched by this daemon can connect
+        self._session = secrets.token_urlsafe(8)
         self._ws: Optional[web.WebSocketResponse] = None
         self._app: Optional[web.Application] = None
         self._runner: Optional[web.AppRunner] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/{self._session}"
 
     def is_connected(self) -> bool:
         return self._ws is not None and not self._ws.closed
@@ -50,15 +57,6 @@ class WebSpeechServer:
                 target=self._run_loop, name="claude-stt-web", daemon=True
             )
             self._thread.start()
-
-            # Wait for server to be ready
-            ready = threading.Event()
-
-            async def _wait_ready():
-                ready.set()
-
-            asyncio.run_coroutine_threadsafe(_wait_ready(), self._loop)
-            # Give server time to bind
             import time
             time.sleep(0.5)
             return True
@@ -73,14 +71,14 @@ class WebSpeechServer:
 
     async def _start_server(self):
         self._app = web.Application()
-        self._app.router.add_get("/", self._handle_index)
-        self._app.router.add_get("/ws", self._handle_ws)
+        self._app.router.add_get(f"/{self._session}", self._handle_index)
+        self._app.router.add_get(f"/{self._session}/ws", self._handle_ws)
 
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "127.0.0.1", self.port)
         await site.start()
-        _logger.info("Web server listening on http://127.0.0.1:%d", self.port)
+        _logger.info("Web server listening at %s", self.url)
 
     async def _handle_index(self, request: web.Request) -> web.Response:
         html = _HTML_PATH.read_text()
@@ -89,26 +87,27 @@ class WebSpeechServer:
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30.0)
         await ws.prepare(request)
-        _logger.info("Chrome WebSocket connected")
 
-        # Replace any existing connection
-        if self._ws and not self._ws.closed:
-            await self._ws.close()
+        # Close any existing connection (only one client allowed)
+        old_ws = self._ws
+        if old_ws and not old_ws.closed:
+            _logger.info("Replacing existing WebSocket connection")
+            await old_ws.close()
         self._ws = ws
+        _logger.info("Chrome WebSocket connected")
 
         try:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
                     self._handle_message(msg.data)
                 elif msg.type in (web.WSMsgType.ERROR, web.WSMsgType.CLOSE, web.WSMsgType.CLOSING):
-                    _logger.warning("WebSocket msg type=%s, data=%s", msg.type, msg.data)
                     break
         except Exception:
             _logger.exception("WebSocket handler error")
         finally:
             if self._ws is ws:
                 self._ws = None
-            _logger.info("Chrome WebSocket disconnected (close_code=%s)", ws.close_code)
+            _logger.info("Chrome WebSocket disconnected")
 
         return ws
 
