@@ -346,9 +346,17 @@ def delete_chars(n: int) -> bool:
         return True
     try:
         if is_wayland() and _has_ydotool():
-            for _ in range(n):
-                if not _ydotool_key("BackSpace"):
-                    return False
+            # Batch all backspaces into a single ydotool call
+            keys = ["BackSpace"] * n
+            result = subprocess.run(
+                ["ydotool", "key", *keys],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                _logger.warning("ydotool backspace failed: %s", result.stderr)
+                return False
             return True
         kb = get_keyboard()
         if kb is None:
