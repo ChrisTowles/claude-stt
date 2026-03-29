@@ -105,7 +105,8 @@ let totalSeconds = 0;
 let recordStart = null;
 let timerInterval = null;
 let currentSessionText = '';
-let committedText = '';  // text from previous recognition segments (before auto-restart)
+let committedText = '';
+let reconnectAttempts = 0;  // text from previous recognition segments (before auto-restart)
 let sessions = [];
 
 function setStatus(state, text) {
@@ -192,6 +193,7 @@ function connectWS() {
   ws = new WebSocket(proto + '//' + location.host + location.pathname + '/ws');
 
   ws.onopen = () => {
+    reconnectAttempts = 0;
     setStatus('idle', 'Connected — waiting for hotkey');
     ws.send(JSON.stringify({ type: 'ready' }));
   };
@@ -218,6 +220,11 @@ function connectWS() {
     shouldListen = false;
     stopRecognition(0);
     stopTimer();
+    reconnectAttempts++;
+    if (reconnectAttempts >= 3) {
+      // Daemon is gone — close the window
+      window.close();
+    }
     setTimeout(connectWS, 2000);
   };
 
