@@ -221,11 +221,11 @@ function connectWS() {
     stopRecognition(0);
     stopTimer();
     reconnectAttempts++;
-    if (reconnectAttempts >= 3) {
-      // Daemon is gone — close the window
-      window.close();
+    if (reconnectAttempts < 3) {
+      setTimeout(connectWS, 2000);
+    } else {
+      setStatus('disconnected', 'Daemon stopped — close this tab');
     }
-    setTimeout(connectWS, 2000);
   };
 
   ws.onerror = () => { ws.close(); };

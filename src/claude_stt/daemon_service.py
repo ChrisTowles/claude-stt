@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import platform
 import signal
 import shutil
 import subprocess
 import threading
 import time
+import webbrowser
 from typing import Optional
 
 from .config import Config
@@ -68,11 +70,18 @@ class STTDaemon:
         return True
 
     def _launch_chrome(self):
+        url = self._server.url
+        if platform.system() == "Darwin":
+            try:
+                webbrowser.open(url)
+                self._logger.info("Opened browser: %s", url)
+            except Exception:
+                self._logger.warning("Failed to open browser — open %s manually", url)
+            return
         chrome = shutil.which("google-chrome") or shutil.which("chromium-browser") or shutil.which("chromium")
         if not chrome:
             self._logger.warning("Chrome not found — open http://127.0.0.1:%d manually", self.config.ws_port)
             return
-        url = self._server.url
         try:
             subprocess.Popen(
                 [chrome, f"--app={url}"],
