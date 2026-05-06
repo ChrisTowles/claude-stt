@@ -1,21 +1,26 @@
 [project]
 name = "claude-stt"
-version = "0.1.0"
-description = "Speech-to-text input for Claude Code with live streaming dictation"
+version = "0.2.0"
+description = "Local speech-to-text input for Claude Code with live streaming dictation (NVIDIA Parakeet)"
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.12,<3.13"
 license = "MIT"
 authors = [
     { name = "Jarrod Watts", email = "jarrod@jarrodwatts.com" }
 ]
-keywords = ["claude", "speech-to-text", "stt", "voice", "dictation"]
+keywords = ["claude", "speech-to-text", "stt", "voice", "dictation", "parakeet", "nemo"]
 
 dependencies = [
-    "aiohttp>=3.9",
     "pynput>=1.7",
     "pyperclip>=1.8",
     "tomli>=2.0",
     "tomli-w>=1.0",
+    "numpy<2",
+    "sounddevice>=0.4",
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "nemo-toolkit[asr]>=2.0",
+    "huggingface-hub>=0.24",
 ]
 
 [project.optional-dependencies]
@@ -35,4 +40,13 @@ packages = ["src/claude_stt"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }

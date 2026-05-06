@@ -403,7 +403,7 @@ def daemon_status():
     logger.info("Config path: %s", Config.get_config_path())
     logger.info("Hotkey: %s", config.hotkey)
     logger.info("Mode: %s", config.mode)
-    logger.info("Web server port: %d", config.ws_port)
+    logger.info("Model: %s", config.model)
 
     if config.output_mode == "auto":
         injection_ready = test_injection()
