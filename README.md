@@ -78,6 +78,34 @@ On Wayland, pynput can't capture global hotkeys. Instead, register the hotkey in
 
 This sends SIGUSR1 to the running daemon to toggle recording.
 
+### Recommended: Caps Lock as the toggle (via keyd)
+
+Caps Lock is the ideal dictation key — it's a single press, near the home row, and most people don't use it. The trick is keeping the OS from toggling its caps-lock state when you press it (otherwise typed text comes out case-inverted).
+
+Use [keyd](https://github.com/rvaiya/keyd) to remap Caps Lock to **F13** (an unused keysym), then bind F13 to `claude-stt toggle` in COSMIC.
+
+```bash
+# 1. Install keyd (Pop!_OS / Ubuntu):
+sudo apt install keyd
+sudo systemctl enable --now keyd
+
+# 2. Install the claude-stt remap (or merge `capslock = f13` into your existing
+#    /etc/keyd/default.conf under [main] — see configs/keyd/claude-stt.conf):
+sudo install -m 0644 configs/keyd/claude-stt.conf /etc/keyd/default.conf
+sudo systemctl restart keyd
+
+# 3. Verify Caps Lock now reports as F13:
+sudo keyd monitor   # press Caps Lock — you should see "f13"
+```
+
+Then in **COSMIC Settings → Keyboard → Custom Shortcuts**, add:
+
+| Field | Value |
+|-------|-------|
+| Name | claude-stt toggle |
+| Command | `/home/<you>/code/f/claude-stt/.venv/bin/python -m claude_stt.daemon toggle` |
+| Shortcut | F13 (press Caps Lock to capture) |
+
 ## Troubleshooting
 
 | Issue | Solution |

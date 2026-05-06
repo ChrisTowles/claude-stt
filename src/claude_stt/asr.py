@@ -34,6 +34,7 @@ class ParakeetEngine:
         sample_rate: int = 16000,
         chunk_ms: int = 320,
         context_seconds: float = 10.0,
+        silence_threshold_dbfs: float = -45.0,
         on_text: Callable[[str], None] | None = None,
         on_error: Callable[[str], None] | None = None,
     ) -> None:
@@ -42,6 +43,7 @@ class ParakeetEngine:
         self.chunk_ms = chunk_ms
         self.chunk_size = int(sample_rate * chunk_ms / 1000)
         self.context_samples = int(sample_rate * context_seconds)
+        self.silence_threshold_dbfs = silence_threshold_dbfs
         self._on_text = on_text or (lambda _t: None)
         self._on_error = on_error or (lambda _e: None)
 
@@ -51,6 +53,7 @@ class ParakeetEngine:
         self._audio_q: queue.Queue = queue.Queue()
         self._active = False
         self._buffer = np.zeros(0, dtype=np.float32)
+        self._speech_started = False
 
     # ------------------------------------------------------------ lifecycle
 
@@ -81,6 +84,7 @@ class ParakeetEngine:
         import sounddevice as sd
 
         self._buffer = np.zeros(0, dtype=np.float32)
+        self._speech_started = False
         while not self._audio_q.empty():
             try:
                 self._audio_q.get_nowait()
@@ -166,6 +170,15 @@ class ParakeetEngine:
             if len(self._buffer) > self.context_samples:
                 self._buffer = self._buffer[-self.context_samples :]
 
+            # Energy gate: don't transcribe until we hear something above the
+            # noise floor.  Parakeet hallucinates ("yeah", "you", "thank you")
+            # on pure silence, which leaks into the typed output.
+            if not self._speech_started:
+                if _rms_dbfs(chunk) > self.silence_threshold_dbfs:
+                    self._speech_started = True
+                else:
+                    continue
+
             try:
                 out = self._model.transcribe(
                     [self._buffer], batch_size=1, verbose=False
@@ -183,6 +196,14 @@ class ParakeetEngine:
                     self._on_text(text)
                 except Exception:
                     _logger.exception("on_text callback failed")
+
+
+def _rms_dbfs(chunk: np.ndarray) -> float:
+    """RMS energy of a float32 chunk in dBFS (full-scale = 0 dB)."""
+    if chunk.size == 0:
+        return -120.0
+    rms = float(np.sqrt(np.mean(np.square(chunk, dtype=np.float64))) + 1e-12)
+    return 20.0 * np.log10(rms)
 
 
 def _extract_text(transcribe_output) -> str:

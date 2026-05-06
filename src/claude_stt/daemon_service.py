@@ -45,6 +45,7 @@ class STTDaemon:
                 model_id=self.config.model,
                 chunk_ms=self.config.chunk_ms,
                 context_seconds=self.config.context_seconds,
+                silence_threshold_dbfs=self.config.silence_threshold_dbfs,
                 on_text=self._on_text,
                 on_error=self._on_recognition_error,
             )

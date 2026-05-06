@@ -36,6 +36,9 @@ class Config:
     model: str = "nvidia/parakeet-tdt-0.6b-v2"
     chunk_ms: int = 320
     context_seconds: float = 10.0
+    # Energy gate (dBFS) below which leading audio is treated as silence and
+    # skipped so Parakeet can't hallucinate words on the noise floor.
+    silence_threshold_dbfs: float = -45.0
 
     # Recording settings
     max_recording_seconds: int = 300  # 5 minutes
@@ -92,6 +95,9 @@ class Config:
                 model=stt_config.get("model", cls.model),
                 chunk_ms=stt_config.get("chunk_ms", cls.chunk_ms),
                 context_seconds=stt_config.get("context_seconds", cls.context_seconds),
+                silence_threshold_dbfs=stt_config.get(
+                    "silence_threshold_dbfs", cls.silence_threshold_dbfs
+                ),
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
                 ),
@@ -121,6 +127,7 @@ class Config:
                 "model": self.model,
                 "chunk_ms": self.chunk_ms,
                 "context_seconds": self.context_seconds,
+                "silence_threshold_dbfs": self.silence_threshold_dbfs,
                 "max_recording_seconds": self.max_recording_seconds,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
@@ -221,6 +228,19 @@ class Config:
         if not isinstance(self.model, str) or not self.model.strip():
             logger.warning("Invalid model id; defaulting to %s", Config.model)
             self.model = Config.model
+
+        try:
+            self.silence_threshold_dbfs = float(self.silence_threshold_dbfs)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid silence_threshold_dbfs; defaulting to %s",
+                Config.silence_threshold_dbfs,
+            )
+            self.silence_threshold_dbfs = Config.silence_threshold_dbfs
+        if self.silence_threshold_dbfs < -120.0:
+            self.silence_threshold_dbfs = -120.0
+        elif self.silence_threshold_dbfs > 0.0:
+            self.silence_threshold_dbfs = 0.0
 
         return self
 
