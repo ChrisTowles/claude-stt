@@ -68,43 +68,31 @@ claude-stt status              # Show daemon status
 claude-stt toggle              # Toggle recording via SIGUSR1
 ```
 
-## Wayland / COSMIC Setup
+## Wayland Setup
 
-On Wayland, pynput can't capture global hotkeys. Instead, register the hotkey in your compositor's settings to run:
-
-```
-/path/to/claude-stt/.venv/bin/python -m claude_stt.daemon toggle
-```
-
-This sends SIGUSR1 to the running daemon to toggle recording.
+On Wayland, pynput can't capture global hotkeys, so the daemon also accepts a `SIGUSR1` toggle. Either register `python -m claude_stt.daemon toggle` as a custom shortcut in your compositor, or use the keyd setup below — which bypasses the compositor entirely and is the most reliable option.
 
 ### Recommended: Caps Lock as the toggle (via keyd)
 
-Caps Lock is the ideal dictation key — it's a single press, near the home row, and most people don't use it. The trick is keeping the OS from toggling its caps-lock state when you press it (otherwise typed text comes out case-inverted).
+Caps Lock is the ideal dictation key — a single press near the home row that most people don't use. The trick is keeping the OS from toggling its caps-lock state when you press it (otherwise typed text comes out case-inverted).
 
-Use [keyd](https://github.com/rvaiya/keyd) to remap Caps Lock to **F13** (an unused keysym), then bind F13 to `claude-stt toggle` in COSMIC.
+Use [keyd](https://github.com/rvaiya/keyd) to intercept Caps Lock and run a `pkill -USR1` against the daemon directly. No compositor binding required.
 
 ```bash
 # 1. Install keyd (Pop!_OS / Ubuntu):
 sudo apt install keyd
 sudo systemctl enable --now keyd
 
-# 2. Install the claude-stt remap (or merge `capslock = f13` into your existing
-#    /etc/keyd/default.conf under [main] — see configs/keyd/claude-stt.conf):
+# 2. Install the claude-stt remap (or merge the [main] line from
+#    configs/keyd/claude-stt.conf into your existing /etc/keyd/default.conf):
 sudo install -m 0644 configs/keyd/claude-stt.conf /etc/keyd/default.conf
 sudo systemctl restart keyd
 
-# 3. Verify Caps Lock now reports as F13:
-sudo keyd monitor   # press Caps Lock — you should see "f13"
+# 3. Verify — pressing Caps Lock should toggle recording in the daemon log:
+tail -f ~/.config/claude-stt/daemon.log
 ```
 
-Then in **COSMIC Settings → Keyboard → Custom Shortcuts**, add:
-
-| Field | Value |
-|-------|-------|
-| Name | claude-stt toggle |
-| Command | `/home/<you>/code/f/claude-stt/.venv/bin/python -m claude_stt.daemon toggle` |
-| Shortcut | F13 (press Caps Lock to capture) |
+We previously routed Caps Lock → Ctrl+Alt+F13 → a COSMIC custom shortcut, but COSMIC's dispatch for F13–F24 doesn't fire reliably. The `command()` path skips the compositor and signals the daemon directly.
 
 ## Troubleshooting
 
