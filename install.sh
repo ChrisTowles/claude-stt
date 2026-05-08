@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Detect OS-specific extras
 case "$(uname -s)" in
     Darwin)
-        echo "ERROR: claude-stt currently requires Linux + a CUDA-capable NVIDIA GPU."
-        echo "macOS support (Parakeet-MLX or WhisperKit) is on the roadmap."
-        exit 1
+        if [[ "$(uname -m)" != "arm64" ]]; then
+            echo "ERROR: macOS support requires Apple Silicon (arm64). Detected: $(uname -m)"
+            exit 1
+        fi
         ;;
-    MINGW*|MSYS*|CYGWIN*) OS_EXTRA="--extra windows" ;;
-    *) OS_EXTRA="" ;;
+    Linux)
+        if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "WARNING: nvidia-smi not found. claude-stt needs a CUDA GPU to run Parakeet."
+            echo "         CPU inference works but is far too slow for live dictation."
+        fi
+        ;;
 esac
 
-if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "WARNING: nvidia-smi not found. claude-stt needs a CUDA GPU to run Parakeet."
-    echo "         CPU inference works but is far too slow for live dictation."
-fi
-
-# Install dependencies (~5–10 min on first run; pulls torch+cu124 and NeMo)
-uv sync --python 3.12 $OS_EXTRA
+# Install dependencies. Platform-specific deps are gated by PEP 508 markers
+# in pyproject.toml — Linux/Windows pull torch+cu124+NeMo, macOS pulls parakeet-mlx.
+uv sync --python 3.12
 
 echo
 echo "Done. First run will download the Parakeet model (~600 MB) on demand."

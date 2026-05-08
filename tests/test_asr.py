@@ -1,10 +1,16 @@
-"""Tests for the ParakeetEngine silence gate and helpers."""
+"""Tests for the silence gate helper used by both engines."""
 
+import sys
 import unittest
 
 import numpy as np
 
-from claude_stt.asr import _rms_dbfs
+# Helper lives in the platform-matching engine module; both have an
+# identical implementation, so import whichever the current platform exposes.
+if sys.platform == "darwin":
+    from claude_stt.engines.mlx import _rms_dbfs
+else:
+    from claude_stt.engines.nemo import _rms_dbfs
 
 
 class RmsDbfsTests(unittest.TestCase):

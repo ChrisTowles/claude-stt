@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Optional
 
-from .asr import ParakeetEngine
+from .asr import ASREngine, create_engine
 from .config import Config
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
@@ -26,7 +26,7 @@ class STTDaemon:
         self._recording = False
 
         # Components
-        self._engine: Optional[ParakeetEngine] = None
+        self._engine: Optional[ASREngine] = None
         self._hotkey: Optional[HotkeyListener] = None
 
         # Recording state
@@ -41,7 +41,7 @@ class STTDaemon:
 
     def _init_components(self) -> bool:
         try:
-            self._engine = ParakeetEngine(
+            self._engine = create_engine(
                 model_id=self.config.model,
                 chunk_ms=self.config.chunk_ms,
                 context_seconds=self.config.context_seconds,
