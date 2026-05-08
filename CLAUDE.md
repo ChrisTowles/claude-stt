@@ -27,15 +27,14 @@ uv run ruff check src/
 
 ## Architecture
 
-**Daemon + Chrome Web Speech API**: A background daemon manages hotkey events and text output. Chrome's Web Speech API handles speech recognition via a localhost page served by the daemon.
+**Daemon + local Parakeet ASR**: A background daemon manages hotkey events, captures audio from the default microphone, and runs streaming inference against NVIDIA Parakeet-TDT (via NeMo) on the local CUDA GPU. Text is typed into the focused app as recognition progresses.
 
 ### Core Components
 
 - `daemon.py` - Process management (start/stop/status, PID file handling, background spawning)
 - `daemon_service.py` - Runtime orchestration (`STTDaemon` class coordinates all components)
+- `asr.py` - `ParakeetEngine`: mic capture (sounddevice) + rolling-buffer streaming inference, emits text via callback
 - `hotkey.py` - Global hotkey listener using pynput (supports toggle and push-to-talk modes)
-- `web/server.py` - HTTP + WebSocket server (aiohttp). Serves the HTML page and bridges Chrome ↔ daemon
-- `web/index.html` - Chrome page with `webkitSpeechRecognition` (streaming, interim results)
 - `keyboard.py` - Text output via ydotool (Wayland), pynput (X11), or clipboard fallback
 - `window.py` - Platform-specific window tracking to restore focus after transcription
 - `config.py` - TOML-based config with validation, stored in `~/.config/claude-stt/`
@@ -43,12 +42,16 @@ uv run ruff check src/
 ### Flow
 
 ```
-Hotkey press → daemon sends "start" via WebSocket → Chrome starts speech recognition
-    → interim results streamed back → text typed in real-time via ydotool
-Hotkey release → daemon sends "stop" → Chrome stops recognition → final correction if needed
+Hotkey press → daemon opens mic → audio chunks queued → Parakeet inference on rolling buffer
+    → growing transcript emitted every ~320 ms → typed live via ydotool (with prefix-diff backspaces)
+Hotkey release → daemon closes mic → final inference flushes → final transcript remains typed
 ```
 
-Communication runs over WebSocket (`ws://localhost:PORT/ws`). Chrome auto-restarts recognition on silence timeout.
+Parakeet-TDT-0.6B-v2 is an offline RNN-T model. We get the "live feel" by re-transcribing the last `context_seconds` of audio after each chunk; the daemon's prefix-diff logic in `_on_text` handles the rare interim corrections by deleting and retyping the differing tail.
+
+### Hardware
+
+Tested on RTX 3060 12 GB + Ryzen 9800X3D. Model uses ~5 GB VRAM (with PyTorch allocator overhead), batch RTF 0.008 (122× real-time), per-chunk inference ~34 ms. macOS / Apple Silicon support is on the roadmap (Parakeet-MLX backend).
 
 ## Task Tracking
 

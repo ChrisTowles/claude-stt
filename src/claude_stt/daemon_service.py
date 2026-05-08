@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import logging
-import platform
 import signal
-import shutil
-import subprocess
 import threading
 import time
-import webbrowser
 from typing import Optional
 
+from .asr import ParakeetEngine
 from .config import Config
 from .errors import HotkeyError
 from .hotkey import HotkeyListener
 from .keyboard import delete_chars, type_text_streaming
 from .sounds import SoundEvent, play_sound
-from .web.server import WebSpeechServer
 from .window import get_active_window, WindowInfo
 
 
@@ -30,7 +26,7 @@ class STTDaemon:
         self._recording = False
 
         # Components
-        self._server: Optional[WebSpeechServer] = None
+        self._engine: Optional[ParakeetEngine] = None
         self._hotkey: Optional[HotkeyListener] = None
 
         # Recording state
@@ -45,13 +41,13 @@ class STTDaemon:
 
     def _init_components(self) -> bool:
         try:
-            self._server = WebSpeechServer(
-                port=self.config.ws_port,
-                on_interim=self._on_text,
-                on_final=self._on_text,
-                on_end=self._on_recognition_end,
+            self._engine = ParakeetEngine(
+                model_id=self.config.model,
+                chunk_ms=self.config.chunk_ms,
+                context_seconds=self.config.context_seconds,
+                silence_threshold_dbfs=self.config.silence_threshold_dbfs,
+                on_text=self._on_text,
                 on_error=self._on_recognition_error,
-                on_ready=self._on_chrome_ready,
             )
 
             self._hotkey = HotkeyListener(
@@ -69,34 +65,8 @@ class STTDaemon:
 
         return True
 
-    def _launch_chrome(self):
-        url = self._server.url
-        if platform.system() == "Darwin":
-            try:
-                webbrowser.open(url)
-                self._logger.info("Opened browser: %s", url)
-            except Exception:
-                self._logger.warning("Failed to open browser — open %s manually", url)
-            return
-        chrome = shutil.which("google-chrome") or shutil.which("chromium-browser") or shutil.which("chromium")
-        if not chrome:
-            self._logger.warning("Chrome not found — open http://127.0.0.1:%d manually", self.config.ws_port)
-            return
-        try:
-            subprocess.Popen(
-                [chrome, f"--app={url}"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._logger.info("Launched Chrome app window: %s", url)
-        except Exception:
-            self._logger.warning("Failed to launch Chrome — open %s manually", url)
-
-    def _on_chrome_ready(self):
-        self._logger.info("Chrome Web Speech API connected and ready")
-
     def _on_text(self, text: str):
-        """Handle interim or final text from Chrome."""
+        """Handle interim/final text from the ASR engine."""
         if not self._recording:
             return
         text = text.strip()
@@ -109,7 +79,13 @@ class STTDaemon:
                 addition = text[len(self._typed_text):]
                 type_text_streaming(addition)
             else:
-                # Correction: find common prefix, delete the tail, type new tail
+                # Correction: find common prefix, delete the tail, type new tail.
+                # NOTE: once recording exceeds `context_seconds` the ASR's
+                # audio buffer rolls and `text` no longer covers the whole
+                # utterance. In that regime this branch will incorrectly
+                # delete earlier text. context_seconds defaults to 30s, which
+                # covers typical dictations; for longer utterances pause and
+                # resume to start a fresh recording.
                 common = 0
                 for i in range(min(len(self._typed_text), len(text))):
                     if self._typed_text[i] == text[i]:
@@ -125,15 +101,9 @@ class STTDaemon:
             self._chars_typed = len(text)
             self._typed_text = text
 
-    def _on_recognition_end(self):
-        if self._recording:
-            self._logger.debug("Recognition ended but still recording (Chrome will auto-restart)")
-
     def _on_recognition_error(self, error: str):
         self._logger.warning("Speech recognition error: %s", error)
-        if error == "not-allowed":
-            self._logger.error("Microphone access denied in Chrome — grant permission and reload")
-        if self.config.sound_effects and error != "no-speech":
+        if self.config.sound_effects:
             play_sound(SoundEvent.WARNING)
 
     def _on_recording_start(self):
@@ -141,8 +111,6 @@ class STTDaemon:
             if self._recording:
                 return
 
-            self._recording = True
-            self._record_start_time = time.time()
             self._typed_text = ""
             self._chars_typed = 0
             self._original_window = get_active_window()
@@ -152,19 +120,18 @@ class STTDaemon:
                 for excluded in self.config.excluded_apps:
                     if excluded.lower() in app:
                         self._logger.info("Skipping: %s is excluded", self._original_window.app_name)
-                        self._recording = False
                         if self._hotkey:
                             self._hotkey.reset_recording()
                         return
 
-            if not self._server or not self._server.is_connected():
-                self._logger.error("Chrome not connected — open %s", self._server.url)
-                self._recording = False
+            if not self._engine or not self._engine.start():
+                self._logger.error("Failed to start ASR engine")
                 if self.config.sound_effects:
                     play_sound(SoundEvent.ERROR)
                 return
 
-            self._server.send_start()
+            self._recording = True
+            self._record_start_time = time.time()
             self._logger.info("Recording started")
             if self.config.sound_effects:
                 play_sound(SoundEvent.START)
@@ -178,8 +145,8 @@ class STTDaemon:
             elapsed = time.time() - self._record_start_time
             self._logger.info("Recording stopped (%.1fs)", elapsed)
 
-            if self._server and self._server.is_connected():
-                self._server.send_stop()
+            if self._engine:
+                self._engine.stop()
 
             if self.config.sound_effects:
                 play_sound(SoundEvent.STOP)
@@ -206,18 +173,19 @@ class STTDaemon:
         self._logger.info("claude-stt daemon starting...")
         self._logger.info("Hotkey: %s", self.config.hotkey)
         self._logger.info("Mode: %s", self.config.mode)
-        self._logger.info("Web server port: %d", self.config.ws_port)
+        self._logger.info("Model: %s", self.config.model)
 
         if not self._init_components():
             raise SystemExit(1)
 
-        if not self._server.start():
-            self._logger.error("Failed to start web server")
+        # Pre-load the model so the first hotkey press is instant.
+        try:
+            self._engine.load()
+        except Exception:
+            self._logger.exception("Failed to load ASR model")
             raise SystemExit(1)
 
-        self._launch_chrome()
-
-        self._logger.info("Ready. Waiting for Chrome to connect at %s", self._server.url)
+        self._logger.info("Ready.")
         if self.config.sound_effects:
             play_sound(SoundEvent.READY)
 
@@ -261,14 +229,12 @@ class STTDaemon:
     def stop(self):
         self._running = False
 
-        if self._recording and self._server:
-            self._server.send_stop()
+        if self._recording and self._engine:
+            self._engine.stop()
+            self._recording = False
 
         if self._hotkey:
             self._hotkey.stop()
-
-        if self._server:
-            self._server.stop()
 
         if self.config.sound_effects:
             play_sound(SoundEvent.SHUTDOWN)

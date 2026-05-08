@@ -32,8 +32,13 @@ class Config:
     hotkey: str = "ctrl+shift+space"
     mode: Literal["push-to-talk", "toggle"] = "toggle"
 
-    # Web server settings
-    ws_port: int = 18333
+    # ASR engine settings
+    model: str = "nvidia/parakeet-tdt-0.6b-v2"
+    chunk_ms: int = 320
+    context_seconds: float = 30.0
+    # Energy gate (dBFS) below which leading audio is treated as silence and
+    # skipped so Parakeet can't hallucinate words on the noise floor.
+    silence_threshold_dbfs: float = -45.0
 
     # Recording settings
     max_recording_seconds: int = 300  # 5 minutes
@@ -87,7 +92,12 @@ class Config:
             config = cls(
                 hotkey=stt_config.get("hotkey", cls.hotkey),
                 mode=stt_config.get("mode", cls.mode),
-                ws_port=stt_config.get("ws_port", cls.ws_port),
+                model=stt_config.get("model", cls.model),
+                chunk_ms=stt_config.get("chunk_ms", cls.chunk_ms),
+                context_seconds=stt_config.get("context_seconds", cls.context_seconds),
+                silence_threshold_dbfs=stt_config.get(
+                    "silence_threshold_dbfs", cls.silence_threshold_dbfs
+                ),
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
                 ),
@@ -114,7 +124,10 @@ class Config:
             "claude-stt": {
                 "hotkey": self.hotkey,
                 "mode": self.mode,
-                "ws_port": self.ws_port,
+                "model": self.model,
+                "chunk_ms": self.chunk_ms,
+                "context_seconds": self.context_seconds,
+                "silence_threshold_dbfs": self.silence_threshold_dbfs,
                 "max_recording_seconds": self.max_recording_seconds,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
@@ -185,6 +198,49 @@ class Config:
         elif self.max_recording_seconds > 600:
             logger.warning("max_recording_seconds too high; clamping to 600")
             self.max_recording_seconds = 600
+
+        try:
+            self.chunk_ms = int(self.chunk_ms)
+        except (TypeError, ValueError):
+            logger.warning("Invalid chunk_ms; defaulting to %s", Config.chunk_ms)
+            self.chunk_ms = Config.chunk_ms
+        if self.chunk_ms < 80:
+            logger.warning("chunk_ms too low; clamping to 80")
+            self.chunk_ms = 80
+        elif self.chunk_ms > 2000:
+            logger.warning("chunk_ms too high; clamping to 2000")
+            self.chunk_ms = 2000
+
+        try:
+            self.context_seconds = float(self.context_seconds)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid context_seconds; defaulting to %s", Config.context_seconds
+            )
+            self.context_seconds = Config.context_seconds
+        if self.context_seconds < 1.0:
+            logger.warning("context_seconds too low; clamping to 1.0")
+            self.context_seconds = 1.0
+        elif self.context_seconds > 60.0:
+            logger.warning("context_seconds too high; clamping to 60.0")
+            self.context_seconds = 60.0
+
+        if not isinstance(self.model, str) or not self.model.strip():
+            logger.warning("Invalid model id; defaulting to %s", Config.model)
+            self.model = Config.model
+
+        try:
+            self.silence_threshold_dbfs = float(self.silence_threshold_dbfs)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid silence_threshold_dbfs; defaulting to %s",
+                Config.silence_threshold_dbfs,
+            )
+            self.silence_threshold_dbfs = Config.silence_threshold_dbfs
+        if self.silence_threshold_dbfs < -120.0:
+            self.silence_threshold_dbfs = -120.0
+        elif self.silence_threshold_dbfs > 0.0:
+            self.silence_threshold_dbfs = 0.0
 
         return self
 

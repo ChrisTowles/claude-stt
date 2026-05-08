@@ -1,0 +1,24 @@
+[project]
+name = "parakeet-spike"
+version = "0.1.0"
+description = "Research spike: NVIDIA Parakeet-TDT for live STT on RTX 3060"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "nemo-toolkit[asr]>=2.0",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    "huggingface-hub>=0.24",
+    "numpy<2",
+    "sounddevice>=0.4",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }

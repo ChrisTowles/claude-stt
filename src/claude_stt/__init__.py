@@ -1,7 +1,7 @@
 """
-claude-stt: Speech-to-text input for Claude Code with live streaming dictation.
+claude-stt: Local speech-to-text input for Claude Code with live streaming dictation.
 
-Uses Chrome's Web Speech API for recognition. Audio is sent to Google's servers.
+Uses NVIDIA Parakeet-TDT (via NeMo) running locally on a CUDA GPU.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

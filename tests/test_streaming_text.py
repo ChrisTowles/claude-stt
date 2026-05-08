@@ -8,10 +8,10 @@ from claude_stt.config import Config
 
 
 class StreamingTextTests(unittest.TestCase):
-    """Test the _on_text method that handles interim/final text from Chrome."""
+    """Test the _on_text method that handles interim/final text from the ASR engine."""
 
     def setUp(self):
-        config = Config(hotkey="ctrl+shift+space", ws_port=0)
+        config = Config(hotkey="ctrl+shift+space")
         self.daemon = STTDaemon(config=config)
         self.daemon._recording = True
 
