@@ -79,7 +79,13 @@ class STTDaemon:
                 addition = text[len(self._typed_text):]
                 type_text_streaming(addition)
             else:
-                # Correction: find common prefix, delete the tail, type new tail
+                # Correction: find common prefix, delete the tail, type new tail.
+                # NOTE: once recording exceeds `context_seconds` the ASR's
+                # audio buffer rolls and `text` no longer covers the whole
+                # utterance. In that regime this branch will incorrectly
+                # delete earlier text. context_seconds defaults to 30s, which
+                # covers typical dictations; for longer utterances pause and
+                # resume to start a fresh recording.
                 common = 0
                 for i in range(min(len(self._typed_text), len(text))):
                     if self._typed_text[i] == text[i]:

@@ -16,7 +16,7 @@ class ConfigTests(unittest.TestCase):
         config = Config()
         self.assertEqual(config.model, "nvidia/parakeet-tdt-0.6b-v2")
         self.assertEqual(config.chunk_ms, 320)
-        self.assertEqual(config.context_seconds, 10.0)
+        self.assertEqual(config.context_seconds, 30.0)
         self.assertEqual(config.silence_threshold_dbfs, -45.0)
 
     def test_silence_threshold_clamped(self):

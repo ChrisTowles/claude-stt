@@ -37,7 +37,7 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 | `mode` | `toggle`, `push-to-talk` | `toggle` | Press to toggle vs hold to record |
 | `model` | HuggingFace model id | `nvidia/parakeet-tdt-0.6b-v2` | NeMo ASR model |
 | `chunk_ms` | 80–2000 | `320` | Streaming chunk size in ms |
-| `context_seconds` | 1–60 | `10.0` | Rolling audio buffer length |
+| `context_seconds` | 1–60 | `30.0` | Rolling audio buffer length (cap on per-recording dictation length) |
 | `output_mode` | `auto`, `injection`, `clipboard` | `auto` | How text is inserted |
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
 | `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
@@ -103,6 +103,7 @@ We previously routed Caps Lock → Ctrl+Alt+F13 → a COSMIC custom shortcut, bu
 | `microphone:` error | Run `arecord -l` to confirm a default capture device exists |
 | Text not appearing (Wayland) | Install ydotool: `sudo apt install ydotool` |
 | Stutter / garbled text mid-utterance | Increase `chunk_ms` to 480–640 in config |
+| Earlier text gets erased / duplicated on long dictations | Recording exceeded `context_seconds` (default 30s); the rolling audio buffer dropped earlier audio. Pause and start a new recording, or raise `context_seconds` (max 60s). |
 
 Set `CLAUDE_STT_LOG_LEVEL=DEBUG` for verbose logs.
 

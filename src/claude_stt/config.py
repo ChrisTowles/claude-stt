@@ -35,7 +35,7 @@ class Config:
     # ASR engine settings
     model: str = "nvidia/parakeet-tdt-0.6b-v2"
     chunk_ms: int = 320
-    context_seconds: float = 10.0
+    context_seconds: float = 30.0
     # Energy gate (dBFS) below which leading audio is treated as silence and
     # skipped so Parakeet can't hallucinate words on the noise floor.
     silence_threshold_dbfs: float = -45.0
