@@ -53,6 +53,10 @@ class ParakeetMLXEngine:
         self._session_active = threading.Event()
         self._shutdown = threading.Event()
         self._load_done = threading.Event()
+        # Set by the worker once the per-session flush (silence pad +
+        # final emission) has completed. `stop()` blocks on this so the
+        # daemon doesn't drop the flush by clearing `_recording` first.
+        self._flush_done = threading.Event()
         self._load_error: BaseException | None = None
         self._speech_started = False
         self._last_emitted = ""
@@ -109,8 +113,8 @@ class ParakeetMLXEngine:
     def stop(self) -> None:
         if not self._session_active.is_set():
             return
-        self._session_active.clear()
 
+        # Close the mic first so no more audio chunks queue up.
         if self._stream is not None:
             try:
                 self._stream.stop()
@@ -119,9 +123,15 @@ class ParakeetMLXEngine:
                 _logger.debug("error closing mic stream", exc_info=True)
             self._stream = None
 
-        # Wake the worker out of its blocking get() so it can exit the
-        # transcribe_stream context cleanly and return to the idle wait.
+        # Clear the session flag *and* push a None sentinel — the worker's
+        # inner loop exits on either, runs its silence-pad flush, then
+        # sets `_flush_done`. We block here so the daemon doesn't clear
+        # `_recording=False` (and start dropping callbacks) before the
+        # final emission lands.
+        self._session_active.clear()
         self._audio_q.put(None)
+        if not self._flush_done.wait(timeout=5.0):
+            _logger.warning("MLX flush did not complete within 5s")
 
     def _drain_audio_q(self) -> None:
         while not self._audio_q.empty():
@@ -161,47 +171,153 @@ class ParakeetMLXEngine:
             self._on_error(str(exc))
 
     def _run_session(self, mx, model) -> None:
-        with model.transcribe_stream(context_size=(256, 256)) as transcriber:
-            while self._session_active.is_set():
-                try:
-                    chunk = self._audio_q.get(timeout=0.5)
-                except queue.Empty:
-                    continue
-                if chunk is None:
-                    break
-
-                while True:
+        # Append-only emission: we feed the daemon `result.text` (finalized
+        # + draft) but only when it extends what we last emitted. If a
+        # draft churn rewrites earlier text we drop that emission rather
+        # than triggering delete-and-retype, which would clobber any
+        # manual edits the user made mid-dictation.
+        #
+        # Reset session-scoped state here (not just in start()) so an
+        # abnormal exit from a prior session can't leave stale prefix
+        # state that would silently freeze the new session's emissions.
+        self._last_emitted = ""
+        self._speech_started = False
+        self._flush_done.clear()
+        chunks_seen = 0
+        try:
+            with model.transcribe_stream(context_size=(256, 256)) as transcriber:
+                # Inner-loop guard checks `_session_active` so a `stop()`
+                # that clears the flag (after waking us with the None
+                # sentinel) can't leave a phantom _run_session running
+                # past the end of the user's recording.
+                while self._session_active.is_set():
                     try:
-                        extra = self._audio_q.get_nowait()
+                        chunk = self._audio_q.get(timeout=0.5)
                     except queue.Empty:
+                        continue
+                    if chunk is None:
                         break
-                    if extra is None:
-                        break
-                    chunk = np.concatenate([chunk, extra])
 
-                # Energy gate: silence-pad before first speech to avoid
-                # the same hallucinated wake-words ("you", "yeah") that
-                # plague the NeMo backend on quiet leading audio.
-                if not self._speech_started:
-                    if _rms_dbfs(chunk) > self.silence_threshold_dbfs:
-                        self._speech_started = True
-                    else:
+                    while True:
+                        try:
+                            extra = self._audio_q.get_nowait()
+                        except queue.Empty:
+                            break
+                        if extra is None:
+                            self._audio_q.put(None)
+                            break
+                        chunk = np.concatenate([chunk, extra])
+
+                    chunks_seen += 1
+                    chunk_db = _rms_dbfs(chunk)
+
+                    # Energy gate: silence-pad before first speech to avoid
+                    # the same hallucinated wake-words ("you", "yeah") that
+                    # plague the NeMo backend on quiet leading audio.
+                    if not self._speech_started:
+                        if chunk_db > self.silence_threshold_dbfs:
+                            self._speech_started = True
+                            _logger.debug(
+                                "mlx: speech detected (chunk #%d, %.1f dBFS > %.1f)",
+                                chunks_seen, chunk_db, self.silence_threshold_dbfs,
+                            )
+                        else:
+                            if chunks_seen % 10 == 1:
+                                # Periodic ping so users can see whether
+                                # their mic audio is actually below the
+                                # gate without flooding the log.
+                                _logger.debug(
+                                    "mlx: below silence gate (chunk #%d, %.1f dBFS, gate %.1f)",
+                                    chunks_seen, chunk_db, self.silence_threshold_dbfs,
+                                )
+                            continue
+
+                    try:
+                        transcriber.add_audio(mx.array(chunk))
+                    except Exception as exc:
+                        _logger.exception("Parakeet-MLX inference failed")
+                        self._on_error(str(exc))
                         continue
 
-                try:
-                    transcriber.add_audio(mx.array(chunk))
-                    text = transcriber.result.text
-                except Exception as exc:
-                    _logger.exception("Parakeet-MLX inference failed")
-                    self._on_error(str(exc))
-                    continue
+                    _logger.debug(
+                        "mlx: add_audio chunk #%d (%.1f dBFS) -> result=%r",
+                        chunks_seen, chunk_db, transcriber.result.text[:80],
+                    )
+                    self._emit_if_extending(transcriber)
 
-                if text and text != self._last_emitted:
-                    self._last_emitted = text
-                    try:
-                        self._on_text(text)
-                    except Exception:
-                        _logger.exception("on_text callback failed")
+                # Session ending — pad silence so the encoder's right-context
+                # window can stabilize the trailing draft tokens before we
+                # exit the streaming context, then do a final emission.
+                try:
+                    silence = mx.zeros(self.sample_rate, dtype=mx.float32)
+                    transcriber.add_audio(silence)
+                except Exception:
+                    _logger.debug("flush silence pad failed", exc_info=True)
+                self._emit_if_extending(transcriber)
+        finally:
+            self._flush_done.set()
+
+    def _emit_if_extending(self, transcriber) -> None:
+        """Bounded-retype emission gate.
+
+        Parakeet's streaming output keeps revising the trailing draft
+        tokens chunk-to-chunk. A strict append-only gate freezes after
+        the first word, because every subsequent draft revises a few
+        characters back (capitalization, punctuation, last-word
+        substitution). A naive "always emit" path lets the daemon's
+        prefix-diff retype unboundedly, clobbering manual edits made
+        seconds ago.
+
+        Compromise: emit whatever the model says, but only when the
+        retype window (chars we'd rewrite) is small. Edits beyond that
+        window are protected — the engine drops the emission rather
+        than clobber. Recent text (~last word) may still flicker.
+        """
+        text = transcriber.result.text  # AlignedResult already strips
+        if not text or text == self._last_emitted:
+            return
+
+        prefix_len = _case_insensitive_lcp_len(self._last_emitted, text)
+        retype_chars = len(self._last_emitted) - prefix_len
+
+        if retype_chars > MAX_RETYPE_CHARS:
+            _logger.debug(
+                "mlx skip: retype too far (%d > %d) last=%r new=%r lcp=%d",
+                retype_chars, MAX_RETYPE_CHARS,
+                self._last_emitted[-60:], text[:60], prefix_len,
+            )
+            return
+
+        if prefix_len == len(text):
+            return  # text is a case-only prefix of _last_emitted; nothing new
+
+        # Preserve the casing of what's already typed up to the LCP, then
+        # append the model's new content past the LCP. The daemon's
+        # prefix-diff will issue at most `retype_chars` backspaces.
+        new_emitted = self._last_emitted[:prefix_len] + text[prefix_len:]
+        if new_emitted == self._last_emitted:
+            return
+        self._last_emitted = new_emitted
+        try:
+            self._on_text(new_emitted)
+        except Exception:
+            _logger.exception("on_text callback failed")
+
+
+# Words rarely run longer than ~20 chars; leave headroom for short
+# multi-word draft revisions ("the test" → "a test" is 8 chars). Bigger
+# than this means the model is rewriting something the user has likely
+# moved past — protect their edits instead.
+MAX_RETYPE_CHARS = 40
+
+
+def _case_insensitive_lcp_len(a: str, b: str) -> int:
+    """Length of the longest common prefix of `a` and `b`, case-insensitive."""
+    n = min(len(a), len(b))
+    for i in range(n):
+        if a[i].lower() != b[i].lower():
+            return i
+    return n
 
 
 def _rms_dbfs(chunk: np.ndarray) -> float:

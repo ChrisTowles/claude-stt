@@ -137,20 +137,27 @@ class STTDaemon:
                 play_sound(SoundEvent.START)
 
     def _on_recording_stop(self):
+        # Snapshot state under the lock, then release it before calling
+        # `engine.stop()`. The engine's stop() blocks until its flush
+        # (silence-pad + final emission) completes, and that flush calls
+        # back into `self._on_text` which re-acquires the lock — so we
+        # must not be holding it. We also keep `_recording=True` across
+        # the flush so the callback's `if not self._recording: return`
+        # gate lets the final text through.
         with self._lock:
             if not self._recording:
                 return
-
-            self._recording = False
             elapsed = time.time() - self._record_start_time
             self._logger.info("Recording stopped (%.1fs)", elapsed)
+            engine = self._engine
 
-            if self._engine:
-                self._engine.stop()
+        if engine is not None:
+            engine.stop()
 
+        with self._lock:
+            self._recording = False
             if self.config.sound_effects:
                 play_sound(SoundEvent.STOP)
-
             if self._typed_text:
                 display = self._typed_text[:100] + "..." if len(self._typed_text) > 100 else self._typed_text
                 self._logger.info("Final transcription: %s", display)
