@@ -255,6 +255,12 @@ class ParakeetMLXEngine:
                     _logger.debug("flush silence pad failed", exc_info=True)
                 self._emit_if_extending(transcriber)
         finally:
+            # Clear `_session_active` here (instead of relying solely on
+            # the caller of stop()) so the worker's outer loop can't
+            # immediately re-enter _run_session — that race would either
+            # eat the next session's chunks or set _flush_done stale and
+            # confuse a waiter that's just about to start a new session.
+            self._session_active.clear()
             self._flush_done.set()
 
     def _emit_if_extending(self, transcriber) -> None:
