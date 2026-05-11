@@ -11,6 +11,16 @@ Parakeet-TDT is an offline RNN-T model — there is no native cache-aware
 streaming path. We approximate live behaviour by re-transcribing the
 last `context_seconds` of audio after every chunk. With a 320 ms chunk
 size on an RTX 3060, total perceived latency lands around 350 ms.
+
+Silence-based buffer reset
+--------------------------
+The rolling raw-audio buffer would otherwise let background audio in a
+long pause (TV across the room, music, hallway chatter) accumulate and
+get re-transcribed alongside the user's actual speech. After
+`silence_reset_seconds` of continuous below-gate audio we purge the
+buffer and re-enter "waiting for speech" mode. Text already emitted is
+preserved by carrying it forward in `_committed_text`, so the daemon's
+prefix-diff typing logic never sees the transcript shrink.
 """
 
 from __future__ import annotations
@@ -21,6 +31,8 @@ import threading
 from collections.abc import Callable
 
 import numpy as np
+
+from ._audio import resolve_input_device, rms_dbfs
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +47,8 @@ class ParakeetEngine:
         chunk_ms: int = 320,
         context_seconds: float = 10.0,
         silence_threshold_dbfs: float = -45.0,
+        silence_reset_seconds: float = 1.5,
+        input_device: str | None = None,
         on_text: Callable[[str], None] | None = None,
         on_error: Callable[[str], None] | None = None,
     ) -> None:
@@ -44,6 +58,8 @@ class ParakeetEngine:
         self.chunk_size = int(sample_rate * chunk_ms / 1000)
         self.context_samples = int(sample_rate * context_seconds)
         self.silence_threshold_dbfs = silence_threshold_dbfs
+        self.input_device = input_device
+        self._silence_reset_chunks = max(1, int(silence_reset_seconds * 1000 / chunk_ms))
         self._on_text = on_text or (lambda _t: None)
         self._on_error = on_error or (lambda _e: None)
 
@@ -54,6 +70,17 @@ class ParakeetEngine:
         self._active = False
         self._buffer = np.zeros(0, dtype=np.float32)
         self._speech_started = False
+        self._silent_chunks = 0
+        # Frozen transcript from previous segments (before the most recent
+        # silence-triggered buffer reset). Emissions are `committed + " " +
+        # current_buffer_text` so the daemon only ever sees the transcript
+        # grow, even though our rolling buffer gets purged on long pauses.
+        self._committed_text: str = ""
+
+    def describe_input_device(self) -> str:
+        """Resolve the configured input device to a friendly name (for logging)."""
+        _, name = resolve_input_device(self.input_device)
+        return name
 
     def load(self) -> None:
         """Load the Parakeet model. Slow on first call (~30s)."""
@@ -83,11 +110,16 @@ class ParakeetEngine:
 
         self._buffer = np.zeros(0, dtype=np.float32)
         self._speech_started = False
+        self._silent_chunks = 0
+        self._committed_text = ""
         while not self._audio_q.empty():
             try:
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
+
+        device_index, device_name = resolve_input_device(self.input_device)
+        _logger.info("Opening input device: %s", device_name)
 
         try:
             self._stream = sd.InputStream(
@@ -95,6 +127,7 @@ class ParakeetEngine:
                 channels=1,
                 dtype="float32",
                 blocksize=self.chunk_size,
+                device=device_index,
                 callback=self._mic_callback,
             )
             self._stream.start()
@@ -159,18 +192,28 @@ class ParakeetEngine:
                     break
                 chunk = np.concatenate([chunk, extra])
 
-            self._buffer = np.concatenate([self._buffer, chunk])
-            if len(self._buffer) > self.context_samples:
-                self._buffer = self._buffer[-self.context_samples :]
+            chunk_db = rms_dbfs(chunk)
+            is_silent = chunk_db <= self.silence_threshold_dbfs
 
             # Energy gate: don't transcribe until we hear something above the
             # noise floor. Parakeet hallucinates ("yeah", "you", "thank you")
             # on pure silence, which leaks into the typed output.
             if not self._speech_started:
-                if _rms_dbfs(chunk) > self.silence_threshold_dbfs:
-                    self._speech_started = True
-                else:
+                if is_silent:
                     continue
+                self._speech_started = True
+                self._silent_chunks = 0
+
+            self._buffer = np.concatenate([self._buffer, chunk])
+            if len(self._buffer) > self.context_samples:
+                self._buffer = self._buffer[-self.context_samples :]
+
+            # Track post-speech silence so we can purge the rolling buffer
+            # on long pauses (e.g. TV bleed during a thinking pause).
+            if is_silent:
+                self._silent_chunks += 1
+            else:
+                self._silent_chunks = 0
 
             try:
                 out = self._model.transcribe(
@@ -185,18 +228,36 @@ class ParakeetEngine:
 
             text = _extract_text(out)
             if text:
+                full = _join(self._committed_text, text)
                 try:
-                    self._on_text(text)
+                    self._on_text(full)
                 except Exception:
                     _logger.exception("on_text callback failed")
 
+            if self._silent_chunks >= self._silence_reset_chunks:
+                # Sustained silence -> freeze the current segment into
+                # committed text and start fresh. The next non-silent
+                # chunk will begin a new segment whose emissions extend
+                # `committed`, so the daemon's prefix-diff appends
+                # cleanly without rewriting earlier text.
+                if text:
+                    self._committed_text = _join(self._committed_text, text)
+                self._buffer = np.zeros(0, dtype=np.float32)
+                self._silent_chunks = 0
+                self._speech_started = False
+                _logger.debug(
+                    "nemo: buffer reset after %d silent chunks; committed=%r",
+                    self._silence_reset_chunks,
+                    self._committed_text[-60:],
+                )
 
-def _rms_dbfs(chunk: np.ndarray) -> float:
-    """RMS energy of a float32 chunk in dBFS (full-scale = 0 dB)."""
-    if chunk.size == 0:
-        return -120.0
-    rms = float(np.sqrt(np.mean(np.square(chunk, dtype=np.float64))) + 1e-12)
-    return 20.0 * np.log10(rms)
+
+def _join(committed: str, new: str) -> str:
+    if not committed:
+        return new
+    if not new:
+        return committed
+    return f"{committed} {new}".strip()
 
 
 def _extract_text(transcribe_output) -> str:

@@ -24,6 +24,8 @@ def create_engine(
     chunk_ms: int,
     context_seconds: float,
     silence_threshold_dbfs: float,
+    silence_reset_seconds: float = 1.5,
+    input_device: str | None = None,
     on_text: Callable[[str], None],
     on_error: Callable[[str], None],
 ) -> ASREngine:
@@ -35,6 +37,8 @@ def create_engine(
             chunk_ms=chunk_ms,
             context_seconds=context_seconds,
             silence_threshold_dbfs=silence_threshold_dbfs,
+            silence_reset_seconds=silence_reset_seconds,
+            input_device=input_device,
             on_text=on_text,
             on_error=on_error,
         )
@@ -46,6 +50,8 @@ def create_engine(
         chunk_ms=chunk_ms,
         context_seconds=context_seconds,
         silence_threshold_dbfs=silence_threshold_dbfs,
+        silence_reset_seconds=silence_reset_seconds,
+        input_device=input_device,
         on_text=on_text,
         on_error=on_error,
     )

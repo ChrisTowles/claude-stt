@@ -23,6 +23,8 @@ from collections.abc import Callable
 
 import numpy as np
 
+from ._audio import resolve_input_device, rms_dbfs
+
 _logger = logging.getLogger(__name__)
 
 
@@ -35,12 +37,15 @@ class ParakeetMLXEngine:
         chunk_ms: int = 320,
         context_seconds: float = 30.0,  # noqa: ARG002 — kept for parity, not used by MLX backend
         silence_threshold_dbfs: float = -45.0,
+        silence_reset_seconds: float = 1.5,  # noqa: ARG002 — NeMo-only knob, kept for parity
+        input_device: str | None = None,
         on_text: Callable[[str], None] | None = None,
         on_error: Callable[[str], None] | None = None,
     ) -> None:
         self.model_id = model_id
         self.chunk_ms = chunk_ms
         self.silence_threshold_dbfs = silence_threshold_dbfs
+        self.input_device = input_device
         self._on_text = on_text or (lambda _t: None)
         self._on_error = on_error or (lambda _e: None)
 
@@ -60,6 +65,11 @@ class ParakeetMLXEngine:
         self._load_error: BaseException | None = None
         self._speech_started = False
         self._last_emitted = ""
+
+    def describe_input_device(self) -> str:
+        """Resolve the configured input device to a friendly name (for logging)."""
+        _, name = resolve_input_device(self.input_device)
+        return name
 
     def load(self) -> None:
         """Spin up the worker thread (which loads the model). Blocks until ready."""
@@ -93,12 +103,16 @@ class ParakeetMLXEngine:
         self._speech_started = False
         self._last_emitted = ""
 
+        device_index, device_name = resolve_input_device(self.input_device)
+        _logger.info("Opening input device: %s", device_name)
+
         try:
             self._stream = sd.InputStream(
                 samplerate=self.sample_rate,
                 channels=1,
                 dtype="float32",
                 blocksize=self.chunk_size,
+                device=device_index,
                 callback=self._mic_callback,
             )
             self._stream.start()
@@ -209,7 +223,7 @@ class ParakeetMLXEngine:
                         chunk = np.concatenate([chunk, extra])
 
                     chunks_seen += 1
-                    chunk_db = _rms_dbfs(chunk)
+                    chunk_db = rms_dbfs(chunk)
 
                     # Energy gate: silence-pad before first speech to avoid
                     # the same hallucinated wake-words ("you", "yeah") that
@@ -326,8 +340,3 @@ def _case_insensitive_lcp_len(a: str, b: str) -> int:
     return n
 
 
-def _rms_dbfs(chunk: np.ndarray) -> float:
-    if chunk.size == 0:
-        return -120.0
-    rms = float(np.sqrt(np.mean(np.square(chunk, dtype=np.float64))) + 1e-12)
-    return 20.0 * np.log10(rms)

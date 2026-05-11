@@ -46,6 +46,8 @@ class STTDaemon:
                 chunk_ms=self.config.chunk_ms,
                 context_seconds=self.config.context_seconds,
                 silence_threshold_dbfs=self.config.silence_threshold_dbfs,
+                silence_reset_seconds=self.config.silence_reset_seconds,
+                input_device=self.config.input_device,
                 on_text=self._on_text,
                 on_error=self._on_recognition_error,
             )
@@ -184,6 +186,12 @@ class STTDaemon:
 
         if not self._init_components():
             raise SystemExit(1)
+
+        if self._engine is not None:
+            try:
+                self._logger.info("Input device: %s", self._engine.describe_input_device())
+            except Exception:
+                self._logger.debug("could not resolve input device for logging", exc_info=True)
 
         # Pre-load the model so the first hotkey press is instant.
         try:

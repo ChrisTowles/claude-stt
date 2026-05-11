@@ -39,6 +39,16 @@ class Config:
     # Energy gate (dBFS) below which leading audio is treated as silence and
     # skipped so Parakeet can't hallucinate words on the noise floor.
     silence_threshold_dbfs: float = -45.0
+    # Audio input device. None / "" / "default" => system default. Otherwise
+    # a case-insensitive substring match against PortAudio device names. The
+    # resolved device is logged at daemon startup so you can see what was
+    # picked up.
+    input_device: str | None = None
+    # After this many seconds of continuous silence (post-speech), the
+    # NeMo backend purges its rolling audio buffer so background audio in
+    # the gap can't carry forward into the next inference pass. The text
+    # already typed is preserved; subsequent speech starts a fresh segment.
+    silence_reset_seconds: float = 1.5
 
     # Recording settings
     max_recording_seconds: int = 300  # 5 minutes
@@ -98,6 +108,10 @@ class Config:
                 silence_threshold_dbfs=stt_config.get(
                     "silence_threshold_dbfs", cls.silence_threshold_dbfs
                 ),
+                input_device=stt_config.get("input_device", cls.input_device),
+                silence_reset_seconds=stt_config.get(
+                    "silence_reset_seconds", cls.silence_reset_seconds
+                ),
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
                 ),
@@ -128,6 +142,8 @@ class Config:
                 "chunk_ms": self.chunk_ms,
                 "context_seconds": self.context_seconds,
                 "silence_threshold_dbfs": self.silence_threshold_dbfs,
+                "input_device": self.input_device or "",
+                "silence_reset_seconds": self.silence_reset_seconds,
                 "max_recording_seconds": self.max_recording_seconds,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
@@ -241,6 +257,26 @@ class Config:
             self.silence_threshold_dbfs = -120.0
         elif self.silence_threshold_dbfs > 0.0:
             self.silence_threshold_dbfs = 0.0
+
+        try:
+            self.silence_reset_seconds = float(self.silence_reset_seconds)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid silence_reset_seconds; defaulting to %s",
+                Config.silence_reset_seconds,
+            )
+            self.silence_reset_seconds = Config.silence_reset_seconds
+        if self.silence_reset_seconds < 0.5:
+            self.silence_reset_seconds = 0.5
+        elif self.silence_reset_seconds > 10.0:
+            self.silence_reset_seconds = 10.0
+
+        if isinstance(self.input_device, str):
+            stripped = self.input_device.strip()
+            self.input_device = stripped if stripped else None
+        elif self.input_device is not None:
+            logger.warning("Invalid input_device %r; using system default", self.input_device)
+            self.input_device = None
 
         return self
 

@@ -18,6 +18,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.chunk_ms, 320)
         self.assertEqual(config.context_seconds, 30.0)
         self.assertEqual(config.silence_threshold_dbfs, -45.0)
+        self.assertIsNone(config.input_device)
+        self.assertEqual(config.silence_reset_seconds, 1.5)
+
+    def test_input_device_round_trip(self):
+        config = Config(input_device="HyperX").validate()
+        self.assertEqual(config.input_device, "HyperX")
 
     def test_silence_threshold_clamped(self):
         self.assertEqual(Config(silence_threshold_dbfs=-200).validate().silence_threshold_dbfs, -120.0)
