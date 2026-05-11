@@ -44,6 +44,7 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
 | `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
 | `max_recording_seconds` | 1-600 | 300 | Maximum recording duration |
+| `silence_auto_stop_seconds` | 0-600 | 60 | In toggle mode, auto-stop when no new text has been transcribed for this long (so a forgotten mic doesn't sit open). `0` disables. |
 | `excluded_apps` | List of app names | `[]` | Skip hotkey when these apps are focused |
 
 ### Picking a specific microphone

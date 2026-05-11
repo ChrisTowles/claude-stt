@@ -52,6 +52,12 @@ class Config:
 
     # Recording settings
     max_recording_seconds: int = 300  # 5 minutes
+    # Auto-stop the recording after this many seconds with no new
+    # transcribed text. Mostly catches the toggle-mode case where you
+    # forget to press the hotkey again — without it, a forgotten mic
+    # keeps capturing background audio until max_recording_seconds.
+    # Set to 0 to disable.
+    silence_auto_stop_seconds: int = 60
 
     # Output settings
     output_mode: Literal["injection", "clipboard", "auto"] = "auto"
@@ -115,6 +121,9 @@ class Config:
                 max_recording_seconds=stt_config.get(
                     "max_recording_seconds", cls.max_recording_seconds
                 ),
+                silence_auto_stop_seconds=stt_config.get(
+                    "silence_auto_stop_seconds", cls.silence_auto_stop_seconds
+                ),
                 output_mode=stt_config.get("output_mode", cls.output_mode),
                 sound_effects=stt_config.get("sound_effects", cls.sound_effects),
                 soft_newlines=stt_config.get("soft_newlines", cls.soft_newlines),
@@ -145,6 +154,7 @@ class Config:
                 "input_device": self.input_device or "",
                 "silence_reset_seconds": self.silence_reset_seconds,
                 "max_recording_seconds": self.max_recording_seconds,
+                "silence_auto_stop_seconds": self.silence_auto_stop_seconds,
                 "output_mode": self.output_mode,
                 "sound_effects": self.sound_effects,
                 "soft_newlines": self.soft_newlines,
@@ -214,6 +224,19 @@ class Config:
         elif self.max_recording_seconds > 600:
             logger.warning("max_recording_seconds too high; clamping to 600")
             self.max_recording_seconds = 600
+
+        try:
+            self.silence_auto_stop_seconds = int(self.silence_auto_stop_seconds)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid silence_auto_stop_seconds; defaulting to %s",
+                Config.silence_auto_stop_seconds,
+            )
+            self.silence_auto_stop_seconds = Config.silence_auto_stop_seconds
+        if self.silence_auto_stop_seconds < 0:
+            self.silence_auto_stop_seconds = 0
+        elif self.silence_auto_stop_seconds > 600:
+            self.silence_auto_stop_seconds = 600
 
         try:
             self.chunk_ms = int(self.chunk_ms)

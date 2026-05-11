@@ -31,6 +31,9 @@ class STTDaemon:
 
         # Recording state
         self._record_start_time: float = 0
+        # Updated on recording start and on every emitted-text change so the
+        # silence auto-stop check can tell when the mic last produced anything.
+        self._last_text_time: float = 0
         self._original_window: Optional[WindowInfo] = None
         self._typed_text: str = ""
         self._chars_typed: int = 0
@@ -74,6 +77,8 @@ class STTDaemon:
         text = text.strip()
         if not text or text == self._typed_text:
             return
+
+        self._last_text_time = time.time()
 
         with self._lock:
             if text.startswith(self._typed_text):
@@ -134,6 +139,7 @@ class STTDaemon:
 
             self._recording = True
             self._record_start_time = time.time()
+            self._last_text_time = self._record_start_time
             self._logger.info("Recording started")
             if self.config.sound_effects:
                 play_sound(SoundEvent.START)
@@ -168,7 +174,8 @@ class STTDaemon:
         if not self._recording:
             return
 
-        elapsed = time.time() - self._record_start_time
+        now = time.time()
+        elapsed = now - self._record_start_time
         max_seconds = self.config.max_recording_seconds
 
         if max_seconds > 30 and max_seconds - 30 <= elapsed < max_seconds - 29:
@@ -176,6 +183,18 @@ class STTDaemon:
                 play_sound(SoundEvent.WARNING)
 
         if elapsed >= max_seconds:
+            self._on_recording_stop()
+            return
+
+        # Idle auto-stop: if no transcribed text has arrived for
+        # `silence_auto_stop_seconds`, treat the session as forgotten
+        # (toggle-mode "I walked away" case) and stop. The timer is
+        # reset on every meaningful _on_text emission.
+        idle_limit = self.config.silence_auto_stop_seconds
+        if idle_limit > 0 and now - self._last_text_time >= idle_limit:
+            self._logger.info(
+                "Auto-stop: no new text in %ds (idle limit)", idle_limit
+            )
             self._on_recording_stop()
 
     def run(self):
