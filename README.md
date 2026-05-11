@@ -38,11 +38,30 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 | `model` | HuggingFace model id | `nvidia/parakeet-tdt-0.6b-v2` | NeMo ASR model |
 | `chunk_ms` | 80–2000 | `320` | Streaming chunk size in ms |
 | `context_seconds` | 1–60 | `30.0` | Rolling audio buffer length (cap on per-recording dictation length) |
+| `input_device` | Mic name substring or empty | `""` | Case-insensitive substring match against PortAudio input devices. Empty = system default. The resolved device is logged at daemon startup. |
+| `silence_reset_seconds` | 0.5–10 | `1.5` | NeMo backend only — purge the rolling audio buffer after this many seconds of continuous silence so background audio in a pause can't carry forward into the next inference pass. |
 | `output_mode` | `auto`, `injection`, `clipboard` | `auto` | How text is inserted |
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
 | `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
 | `max_recording_seconds` | 1-600 | 300 | Maximum recording duration |
 | `excluded_apps` | List of app names | `[]` | Skip hotkey when these apps are focused |
+
+### Picking a specific microphone
+
+Background noise (TVs, music, hallway chatter) is much easier to keep out of transcripts with a near-field mic than with any software filter. If you have a headset or USB cardioid, set `input_device` to a substring of its name:
+
+```toml
+[claude-stt]
+input_device = "HyperX"
+```
+
+To see what's available:
+
+```bash
+uv run python -c "import sounddevice as sd; print(sd.query_devices())"
+```
+
+The daemon logs the resolved device at startup (`Input device: HyperX QuadCast`). If the configured device isn't present, it falls back to the system default and logs a warning.
 
 ## Requirements
 
