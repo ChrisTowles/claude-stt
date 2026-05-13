@@ -61,8 +61,9 @@ def _ydotool_type(text: str) -> bool:
     Returns:
         True if successful, False otherwise.
     """
+    # key-delay prevents ydotool from dropping spaces/chars when typing fast
     result = subprocess.run(
-        ["ydotool", "type", "--", text],
+        ["ydotool", "type", "--key-delay", "2", "--", text],
         capture_output=True,
         text=True,
         timeout=10,
@@ -370,9 +371,7 @@ def delete_chars(n: int) -> bool:
 
 
 def type_text_streaming(text: str) -> bool:
-    """Type text character by character for streaming output.
-
-    This is used during live transcription to show words as they're recognized.
+    """Type text for streaming output. Uses ydotool on Wayland.
 
     Args:
         text: The text to type.
@@ -381,7 +380,11 @@ def type_text_streaming(text: str) -> bool:
         True if successful, False otherwise.
     """
     try:
+        if is_wayland() and _has_ydotool():
+            return _ydotool_type(text)
         kb = get_keyboard()
+        if kb is None:
+            return False
         kb.type(text)
         return True
     except Exception:

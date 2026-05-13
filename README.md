@@ -1,18 +1,15 @@
 # Claude STT (Fork)
 
-Speech-to-text input for Claude Code. Hold a hotkey, speak, and your words appear in the focused app — all processed locally.
+Speech-to-text input for Claude Code. Hold a hotkey, speak, and your words appear in the focused app.
 
-> **Note**: This is a diverged fork of [jarrodwatts/claude-stt](https://github.com/jarrodwatts/claude-stt). While a PR was contributed back upstream, this fork has diverged significantly: switched to uv, removed Moonshine in favor of Whisper-only, removed the Claude Code plugin integration, added ydotool support for Wayland/COSMIC, audio cues for daemon lifecycle, configurable language, optional text improvement via Claude CLI (grammar/punctuation cleanup before typing), and other changes that differ from upstream goals.
+> **Note**: This is a diverged fork of [jarrodwatts/claude-stt](https://github.com/jarrodwatts/claude-stt).
 
 ## Quick Start
 
 ```bash
-# Clone and install
 git clone https://github.com/ChrisTowles/claude-stt
 cd claude-stt
-uv sync --extra dev
-
-# Run the daemon
+uv sync
 uv run claude-stt run
 ```
 
@@ -21,19 +18,17 @@ Press **Ctrl+Shift+Space** to start recording, press again to stop and transcrib
 ## How It Works
 
 ```
-Press Ctrl+Shift+Space -> start recording
-        |
+Press hotkey -> start recording
+       |
 Audio captured from microphone
-        |
-Press Ctrl+Shift+Space -> stop recording
-        |
-Whisper STT processes locally
-        |
+       |
+Press hotkey -> stop recording
+       |
+Speech-to-text via Chrome Web Speech API
+       |
 Text injected into focused app (ydotool/pynput)
 ```
 
-- Audio is processed in memory and immediately discarded
-- Uses faster-whisper for local inference
 - Text injection via ydotool (Wayland) or pynput (X11), with clipboard fallback
 - Audio feedback for recording start/stop, transcription complete, daemon ready/shutdown
 
@@ -45,14 +40,12 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 |--------|--------|---------|-------------|
 | `hotkey` | Key combo | `ctrl+shift+space` | Trigger recording |
 | `mode` | `toggle`, `push-to-talk` | `toggle` | Press to toggle vs hold to record |
-| `whisper_model` | Whisper model name | `medium` | Model size (tiny, base, small, medium, large) |
-| `language` | ISO 639-1 code or `auto` | `auto` | Transcription language (`en`, `fr`, etc.) |
+| `stt_model` | Model name | `Qwen/Qwen3-ASR-1.7B` | STT model (HuggingFace ID) |
 | `output_mode` | `auto`, `injection`, `clipboard` | `auto` | How text is inserted |
 | `sound_effects` | `true`, `false` | `true` | Play audio feedback |
 | `soft_newlines` | `true`, `false` | `true` | Use Shift+Enter for intermediate newlines |
-| `improve_hotkey` | Hotkey combo | `cmd+alt+d` | Hotkey to record + fix grammar via Claude CLI |
 | `max_recording_seconds` | 1-600 | 300 | Maximum recording duration |
-| `audio_device` | Device index or null | null | Audio input device (null = system default) |
+| `audio_device` | Device name/index or null | null | Audio input device (null = system default) |
 | `excluded_apps` | List of app names | `[]` | Skip hotkey when these apps are focused |
 
 ## Requirements
@@ -65,19 +58,18 @@ Settings stored in `~/.config/claude-stt/config.toml`.
 
 | Platform | Requirements |
 |----------|-------------|
-| **Linux (Wayland)** | `ydotool` for text injection (required) |
+| **Linux (Wayland)** | `ydotool` for text injection |
 | **Linux (X11)** | `xdotool` for window management |
 | **macOS** | Accessibility permissions |
-| **Windows** | pywin32 for window tracking |
 
 ## CLI Commands
 
 ```bash
-claude-stt run              # Run daemon in foreground
+claude-stt run                 # Run daemon in foreground
 claude-stt start --background  # Run daemon in background
-claude-stt stop             # Stop daemon
-claude-stt status           # Show daemon status
-claude-stt setup            # First-time setup
+claude-stt stop                # Stop daemon
+claude-stt status              # Show daemon status
+claude-stt toggle              # Toggle recording via SIGUSR1
 ```
 
 ## Troubleshooting
@@ -86,15 +78,21 @@ claude-stt setup            # First-time setup
 |-------|----------|
 | No audio input | Check microphone permissions |
 | Text not appearing (Wayland) | Install ydotool: `sudo apt install ydotool` |
-| Text not appearing (X11) | Grant Accessibility permissions (macOS) or install xdotool (Linux) |
-| Garbled text on COSMIC | Ensure ydotool is installed (wtype has keymap bugs on COSMIC) |
-| Model not loading | Run `claude-stt setup` to download. Check disk space |
+| Text not appearing (X11) | Install xdotool (Linux) or grant Accessibility permissions (macOS) |
 
 Set `CLAUDE_STT_LOG_LEVEL=DEBUG` for verbose logs.
 
-## Privacy
+## Engine History
 
-All processing is local. No audio or text is sent to external services. No telemetry.
+This project tried several local STT approaches before settling on the current architecture:
+
+1. **faster-whisper (Whisper medium)** — Original engine. Reliable but slow (~7.4% WER), batch-only, no streaming.
+
+2. **Cohere Transcribe (cohere-transcribe-03-2026)** — #1 on the Open ASR Leaderboard (5.42% WER). Required a gated HuggingFace repo and `trust_remote_code`. The legacy `model.transcribe()` API produced garbled output; switching to the native `CohereAsrForConditionalGeneration` + `model.generate()` API fixed it, but it was batch-only with no streaming support.
+
+3. **Qwen3-ASR-1.7B** — #6 on the Open ASR Leaderboard (5.76% WER). Supports streaming via vLLM backend. vLLM required significant GPU memory tuning (`max_model_len`, `gpu_memory_utilization`) to fit on a 12GB RTX 3060. Streaming worked but was too slow for real-time dictation — partial results arrived with multi-second latency, and the append-only typing approach couldn't keep up with engine corrections. The vLLM process also consumed substantial system resources.
+
+4. **Chrome Web Speech API** (current) — Chrome's built-in speech recognition provides instant streaming transcription with no model loading, no GPU usage, and no dependency management. Accuracy is comparable to the best local models for English dictation. The tradeoff is that audio is processed by Google's servers rather than locally.
 
 ## License
 

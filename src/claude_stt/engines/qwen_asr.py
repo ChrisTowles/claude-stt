@@ -97,7 +97,12 @@ class QwenASREngine:
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
             state = self._model.streaming_transcribe(audio, state)
-            return (state.text or "").strip()
+            text = (state.text or "").strip()
+            self._logger.debug(
+                "stream_chunk: %d samples, chunk_id=%s, text=%r",
+                len(audio), getattr(state, 'chunk_id', '?'), text,
+            )
+            return text
         except Exception:
             self._logger.exception("Streaming transcription failed")
             return ""

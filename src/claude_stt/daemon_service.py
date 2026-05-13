@@ -145,7 +145,13 @@ class STTDaemon:
             self._logger.error("Failed to init streaming state")
             return
 
-        prev_text = ""
+        typed_text = ""  # what we've actually typed on screen
+        last_engine_text = ""  # last text engine returned (to avoid log spam)
+        chunk_count = 0
+        audio_buffer = []
+        buffer_samples = 0
+        # Feed engine in ~0.5s batches (8000 samples at 16kHz)
+        batch_size = self.config.sample_rate // 2
 
         while not self._stop_streaming.is_set():
             chunk = self._recorder.get_chunk(timeout=0.1)
@@ -156,31 +162,74 @@ class STTDaemon:
             if chunk.dtype != np.float32:
                 chunk = chunk.astype(np.float32)
 
-            new_text = self._engine.stream_chunk(chunk, state)
+            audio_buffer.append(chunk)
+            buffer_samples += len(chunk)
 
-            if new_text and new_text != prev_text:
-                # Delete previous partial text and type new
+            if buffer_samples < batch_size:
+                continue
+
+            batch = np.concatenate(audio_buffer)
+            audio_buffer.clear()
+            buffer_samples = 0
+            chunk_count += 1
+
+            new_text = self._engine.stream_chunk(batch, state)
+
+            if not new_text or new_text == last_engine_text:
+                continue
+            last_engine_text = new_text
+
+            if not typed_text:
+                # First real text — type it out
+                self._logger.info("Streaming [%d]: initial %r", chunk_count, new_text)
+                type_text_streaming(new_text)
+                self._chars_typed = len(new_text)
+                typed_text = new_text
+            elif new_text.startswith(typed_text):
+                # Append-only: type just the new words
+                addition = new_text[len(typed_text):]
+                self._logger.info("Streaming [%d]: +%r", chunk_count, addition)
+                type_text_streaming(addition)
+                self._chars_typed = len(new_text)
+                typed_text = new_text
+            else:
+                # Engine corrected earlier text — delete and retype
+                self._logger.info("Streaming [%d]: correction, retyping", chunk_count)
                 if self._chars_typed > 0:
                     delete_chars(self._chars_typed)
                 type_text_streaming(new_text)
                 self._chars_typed = len(new_text)
-                prev_text = new_text
+                typed_text = new_text
+
+        # Flush remaining buffer
+        if audio_buffer:
+            batch = np.concatenate(audio_buffer)
+            self._engine.stream_chunk(batch, state)
+            audio_buffer.clear()
+
+        self._logger.info("Streaming done: %d chunks, finalizing", chunk_count)
 
         # Finalize: flush remaining audio
         final_text = self._engine.finish_stream(state)
         if final_text:
-            if self._chars_typed > 0:
-                delete_chars(self._chars_typed)
-            self._chars_typed = 0
-
             final_text = final_text.strip()
-            if final_text:
-                display = final_text[:100] + "..." if len(final_text) > 100 else final_text
-                self._logger.info("Final transcription: %s", display)
-                output_text(final_text, self._original_window, self.config)
+
+        if final_text:
+            display = final_text[:100] + "..." if len(final_text) > 100 else final_text
+            self._logger.info("Final: %s", display)
+
+            if final_text == typed_text:
+                self._logger.info("Final matches streamed text")
+            elif final_text.startswith(typed_text):
+                addition = final_text[len(typed_text):]
+                self._logger.info("Appending final: %r", addition)
+                type_text_streaming(addition)
             else:
-                self._logger.info("No speech detected")
-                self._play_warning()
+                self._logger.info("Correcting: replacing %d typed chars", self._chars_typed)
+                if self._chars_typed > 0:
+                    delete_chars(self._chars_typed)
+                type_text_streaming(final_text)
+            self._chars_typed = 0
         else:
             if self._chars_typed > 0:
                 delete_chars(self._chars_typed)
@@ -206,11 +255,12 @@ class STTDaemon:
 
         # Signal streaming thread to finalize
         self._stop_streaming.set()
-        if self._streaming_thread:
-            self._streaming_thread.join(timeout=10.0)
-            if self._streaming_thread.is_alive():
+        thread = self._streaming_thread
+        if thread is not None:
+            thread.join(timeout=10.0)
+            if thread.is_alive():
                 self._logger.warning("Streaming thread did not exit cleanly")
-            self._streaming_thread = None
+        self._streaming_thread = None
 
     def _check_max_recording_time(self) -> None:
         if not self._recording:
@@ -290,8 +340,10 @@ class STTDaemon:
         self._stop_event.set()
         self._stop_streaming.set()
 
-        if self._streaming_thread:
-            self._streaming_thread.join(timeout=5.0)
+        thread = self._streaming_thread
+        if thread is not None:
+            thread.join(timeout=5.0)
+        self._streaming_thread = None
 
         if self._recording and self._recorder:
             self._recorder.stop()
